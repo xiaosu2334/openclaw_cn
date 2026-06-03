@@ -53,7 +53,7 @@ const TECHNICAL_TERMS = new Set([
   'GitHub', 'GitLab', 'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure',
   'Node.js', 'React', 'Vue', 'Angular', 'TypeScript', 'JavaScript',
   'Python', 'Go', 'Rust', 'Java', 'C++', 'Ruby', 'PHP',
-  'Cron', 'WebSocket', 'Webhook',
+  'Cron', 'WebSocket', 'Webhook', 'OpenAI', 'Claude',
 ]);
 
 const TECHNICAL_PREFIXES = new Set([
