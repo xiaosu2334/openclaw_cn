@@ -479,7 +479,7 @@ export const zh_CN: TranslationMap = {
     duration: {
       ms: "{count} ms",
       seconds: "{count} s",
-      minutes: "{minutes}m {seconds}s",
+      minutes: "{minutes}分{seconds}秒",
     },
   },
   workboard: {
@@ -560,7 +560,7 @@ export const zh_CN: TranslationMap = {
     badgeArtifacts: "{count} 个产物",
     badgeAttachments: "{count} 个附件",
     badgeWorkerLogs: "{count} 条 worker 日志",
-    badgeWorkerProtocol: "worker {state}",
+    badgeWorkerProtocol: "Worker {state}",
     badgeTenant: "租户 {tenant}",
     badgeSkills: "{count} 个技能",
     badgeDispatches: "{count} 次调度",
