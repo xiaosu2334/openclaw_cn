@@ -10,7 +10,9 @@ param(
     [string]$GitDir,
     [switch]$NoOnboard,
     [switch]$NoGitUpdate,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Build,
+    [switch]$Quick
 )
 
 $ErrorActionPreference = "Stop"
@@ -220,11 +222,15 @@ function Install-OpenClawFromGit {
             }
         }
 
-        Write-Host "  正在构建项目..." -ForegroundColor Gray
-        $env:NODE_OPTIONS = Resolve-NodeOptionsWithMinOldSpace -NodeOptions $prevNodeOptions -MinOldSpaceMb 8192
-        & $pnpmCommand build
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "错误: 构建失败" -ForegroundColor Red; return $false
+        if ($Build -or -not $Quick) {
+            Write-Host "  正在构建项目..." -ForegroundColor Gray
+            $env:NODE_OPTIONS = Resolve-NodeOptionsWithMinOldSpace -NodeOptions $prevNodeOptions -MinOldSpaceMb 8192
+            & $pnpmCommand build
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "错误: 构建失败" -ForegroundColor Red; return $false
+            }
+        } else {
+            Write-Host "  [!] 跳过构建（使用 -Build 参数启用完整构建）" -ForegroundColor Yellow
         }
     } finally {
         if ($pushedLocation) { Pop-Location }
@@ -237,12 +243,16 @@ function Install-OpenClawFromGit {
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Force -Path $binDir | Out-Null }
 
     $entryPath = Join-Path $RepoDir "openclaw.mjs"
-    if (-not (Test-Path $entryPath)) {
-        Write-Host "错误: 未找到 $entryPath" -ForegroundColor Red; return $false
-    }
+    $distEntry = Join-Path $RepoDir "dist\entry.js"
 
     $cmdPath = Join-Path $binDir $WrapperName
-    $cmdContents = "@echo off`r`nnode ""$entryPath"" %*`r`n"
+    if (Test-Path $distEntry) {
+        # Built: use the standard launcher
+        $cmdContents = "@echo off`r`nnode ""$entryPath"" %*`r`n"
+    } else {
+        # Not built: use tsx to run TypeScript directly
+        $cmdContents = "@echo off`r`ncd /d ""$RepoDir"" && npx tsx src/entry.ts %*`r`n"
+    }
     Set-Content -Path $cmdPath -Value $cmdContents -NoNewline
 
     if (Add-ToUserPath $binDir) {
@@ -336,13 +346,23 @@ function Main {
     Write-Host ""
     Write-Host "  源码位置:  $GitDir" -ForegroundColor DarkGray
     Write-Host "  快捷方式:  $wrapperPath" -ForegroundColor DarkGray
+
+    if (-not (Test-Path $distEntry)) {
+        Write-Host ""
+        Write-Host "  ── 注意：未检测到构建输出 ──" -ForegroundColor Yellow
+        Write-Host "  当前使用 tsx 直接运行 TypeScript 源码。" -ForegroundColor Yellow
+        Write-Host "  如需完整构建以提升性能：" -ForegroundColor Yellow
+        Write-Host "    cd $GitDir && pnpm build" -ForegroundColor Gray
+    }
+
     Write-Host ""
 
     # Update instructions
     Write-Host "  ── 更新命令 ──" -ForegroundColor DarkGray
     Write-Host "  cd $GitDir" -ForegroundColor Gray
     Write-Host "  git checkout cn-main && git pull origin cn-main" -ForegroundColor Gray
-    Write-Host "  pnpm install && pnpm build" -ForegroundColor Gray
+    Write-Host "  pnpm install" -ForegroundColor Gray
+    Write-Host "  # 如需完整构建: pnpm build" -ForegroundColor Gray
     Write-Host ""
 
     # Maintenance commands
