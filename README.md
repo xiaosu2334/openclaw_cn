@@ -1,3 +1,48 @@
+# 🦞 OpenClaw CN — 中文魔改版
+
+> **OpenClaw 简体中文汉化分支** · 基于 `cn-main` 分支，跟随官方主分支同步更新
+
+**本仓库是 [openclaw/openclaw](https://github.com/openclaw/openclaw) 的汉化魔改版本**，主要改动：
+
+- 🀄 **全界面简体中文**：UI 100% 汉化（2795 条翻译），代码命令保持英文，所有解释说明全中文
+- 🎨 **现代简约暖色调 TUI**：暗色暖棕背景 (#1E1C1A) + 暖金强调 (#D4A853)，护眼不刺眼
+- ⚡ **TUI 性能优化**：单行提交零延迟、Abort 即时反馈+并行化、增量历史更新
+- 🔧 **Bug 修复**：TUI 设置现在会持久化写入 `openclaw.json`，不再重启丢失
+- 🔄 **上游同步架构**：`main` 分支追踪官方，`cn-main` 分支保留所有汉化改动，merge 策略受 `.gitattributes` 保护
+
+---
+
+## 一键安装
+
+**Windows (PowerShell)：**
+
+```powershell
+irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
+```
+
+安装后运行 `openclaw-cn` 启动。安装脚本会自动检测/安装 Node.js、pnpm、Git，克隆并构建整个项目。
+
+**macOS / Linux / WSL：**
+
+```bash
+git clone -b cn-main https://github.com/xiaosu2334/openclaw_cn.git ~/openclaw-cn
+cd ~/openclaw-cn
+pnpm install && pnpm build
+sudo ln -sf "$(pwd)/openclaw.mjs" /usr/local/bin/openclaw-cn
+```
+
+或使用 Node.js 直接运行：
+
+```bash
+node ~/openclaw-cn/openclaw.mjs
+```
+
+---
+
+> 📖 以下是原始 OpenClaw README
+
+---
+
 # 🦞 OpenClaw — Personal AI Assistant
 
 <p align="center">
