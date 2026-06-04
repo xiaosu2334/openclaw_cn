@@ -451,7 +451,7 @@ export const zh_CN: TranslationMap = {
       useCurrentChat: "Use current chat",
       useCurrentChatAria: "Use current chat for revision requests",
       useCurrentChatTooltip:
-        "Send revision requests to the current chat session instead of the proposal's workshop session.",
+        "将修订请求发送到当前聊天会话，而非提案的工作坊会话。",
     },
   },
   activity: {
