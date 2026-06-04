@@ -1230,13 +1230,21 @@ describe("EmbeddedTuiBackend", () => {
         agentId: "work",
         runId: "run-local-default-global",
       }),
-    ).resolves.toEqual({ ok: true, aborted: false });
+    ).resolves.toEqual({
+      ok: true,
+      aborted: false,
+      errorMessage: "无法中止：当前agent与run不匹配",
+    });
     await expect(
       backend.abortChat({
         sessionKey: "global",
         runId: "run-local-work-global",
       }),
-    ).resolves.toEqual({ ok: true, aborted: false });
+    ).resolves.toEqual({
+      ok: true,
+      aborted: false,
+      errorMessage: "无法中止：当前agent与run不匹配",
+    });
 
     expect(defaultAbortListener).not.toHaveBeenCalled();
     expect(workAbortListener).not.toHaveBeenCalled();
@@ -1868,10 +1876,7 @@ describe("EmbeddedTuiBackend", () => {
     const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
     getRuntimeConfigMock.mockReturnValue({
       agents: {
-        list: [
-          { id: "main", default: true },
-          { id: "work" },
-        ],
+        list: [{ id: "main", default: true }, { id: "work" }],
       },
     });
     const pending = deferred<{

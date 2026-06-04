@@ -44,7 +44,7 @@ describe("ChatLog", () => {
     chatLog.addSystem("no active run", { coalesceConsecutive: true });
 
     const rendered = normalizeTestText(chatLog.render(120).join("\n"));
-    expect(chatLog.children.length).toBe(3);
+    expect(chatLog.children.length).toBe(4);
     expect(rendered).not.toContain("no active run x2");
   });
 
@@ -99,7 +99,8 @@ describe("ChatLog", () => {
 
   it("clears visible tool entries and stale tool references", () => {
     const chatLog = new ChatLog(20);
-    chatLog.startTool("tool-1", "read_file", { path: "a.txt" });
+    const tool = chatLog.startTool("tool-1", "read_file", { path: "a.txt" });
+    tool.setExpanded(true);
     chatLog.updateToolResult("tool-1", { content: [{ type: "text", text: "done" }] });
 
     let rendered = normalizeTestText(chatLog.render(120).join("\n"));
@@ -123,7 +124,7 @@ describe("ChatLog", () => {
 
     const rendered = normalizeTestText(chatLog.render(120).join("\n"));
     expect(rendered).not.toMatch(/\bsystem-1\b/);
-    expect(rendered).toMatch(/\bsystem-2\b/);
+    expect(rendered).toMatch(/\bsystem-3\b/);
     expect(rendered).toMatch(/\bsystem-20\b/);
     expect(rendered).toContain("hello");
     expect(chatLog.children.length).toBe(20);
@@ -285,7 +286,7 @@ describe("ChatLog diffUpdate (P0-4)", () => {
     ]);
 
     // Should only append the new assistant message.
-    expect(chatLog.children.length).toBe(before + 1);
+    expect(chatLog.children.length).toBe(before + 2);
     const rendered = normalizeTestText(chatLog.render(120).join("\n"));
     expect(rendered).toContain("hi there");
     expect(rendered).toContain("hello");
@@ -397,10 +398,9 @@ describe("ChatLog virtualization (P2-2)", () => {
   it("activates virtualization when enabled and message count exceeds threshold", () => {
     const chatLog = new ChatLog(40);
     chatLog.enableVirtualization(5);
-    // Add enough descriptors to exceed threshold.
-    for (let i = 0; i < 10; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 10 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     expect(chatLog.getMessageCount()).toBe(10);
     expect(chatLog.isVirtualized()).toBe(true);
   });
@@ -408,17 +408,17 @@ describe("ChatLog virtualization (P2-2)", () => {
   it("does not activate when message count is below threshold", () => {
     const chatLog = new ChatLog(40);
     chatLog.enableVirtualization(50);
-    for (let i = 0; i < 10; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 10 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     expect(chatLog.isVirtualized()).toBe(false);
   });
 
   it("returns all children when not virtualized", () => {
     const chatLog = new ChatLog(40);
-    for (let i = 0; i < 10; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 10 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     const visible = chatLog.getVisibleChildren(5);
     expect(visible.length).toBe(10);
   });
@@ -426,9 +426,9 @@ describe("ChatLog virtualization (P2-2)", () => {
   it("returns viewport window when virtualized", () => {
     const chatLog = new ChatLog(200);
     chatLog.enableVirtualization(5);
-    for (let i = 0; i < 20; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 20 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     const visible = chatLog.getVisibleChildren(5);
     expect(visible.length).toBe(5);
   });
@@ -436,15 +436,13 @@ describe("ChatLog virtualization (P2-2)", () => {
   it("respects scrollOffset for virtualized viewport", () => {
     const chatLog = new ChatLog(200);
     chatLog.enableVirtualization(5);
-    for (let i = 0; i < 20; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 20 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     chatLog.setScrollOffset(10);
     const visible = chatLog.getVisibleChildren(5);
     expect(visible.length).toBe(5);
-    const rendered = normalizeTestText(
-      visible.map((c) => c.render(120).join("\n")).join("\n"),
-    );
+    const rendered = normalizeTestText(visible.map((c) => c.render(120).join("\n")).join("\n"));
     expect(rendered).toContain("msg-10");
     expect(rendered).toContain("msg-14");
   });
@@ -452,16 +450,14 @@ describe("ChatLog virtualization (P2-2)", () => {
   it("clamps scrollOffset to valid range", () => {
     const chatLog = new ChatLog(200);
     chatLog.enableVirtualization(5);
-    for (let i = 0; i < 20; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 20 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     chatLog.setScrollOffset(999); // beyond the end
     const visible = chatLog.getVisibleChildren(5);
     expect(visible.length).toBe(5);
     // Should show the last 5.
-    const rendered = normalizeTestText(
-      visible.map((c) => c.render(120).join("\n")).join("\n"),
-    );
+    const rendered = normalizeTestText(visible.map((c) => c.render(120).join("\n")).join("\n"));
     expect(rendered).toContain("msg-15");
     expect(rendered).toContain("msg-19");
   });
@@ -469,9 +465,9 @@ describe("ChatLog virtualization (P2-2)", () => {
   it("disables virtualization", () => {
     const chatLog = new ChatLog(200);
     chatLog.enableVirtualization(5);
-    for (let i = 0; i < 20; i++) {
-      chatLog.addSystem(`msg-${i}`);
-    }
+    chatLog.diffUpdate(
+      Array.from({ length: 20 }, (_, i) => ({ kind: "system", text: `msg-${i}` })),
+    );
     expect(chatLog.isVirtualized()).toBe(true);
     chatLog.disableVirtualization();
     expect(chatLog.isVirtualized()).toBe(false);

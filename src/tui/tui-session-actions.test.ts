@@ -43,6 +43,7 @@ describe("tui session actions", () => {
       chatLog: {
         addSystem: vi.fn(),
         clearAll: vi.fn(),
+        diffUpdate: vi.fn(),
       } as unknown as import("./components/chat-log.js").ChatLog,
       btw: createBtwPresenter(),
       tui: { requestRender: vi.fn() } as unknown as import("@earendil-works/pi-tui").TUI,
@@ -502,6 +503,7 @@ describe("tui session actions", () => {
     const chatLog = {
       addSystem: vi.fn(),
       clearAll: vi.fn(),
+      diffUpdate: vi.fn(),
       addUser: vi.fn(),
       finalizeAssistant: vi.fn(),
       updateAssistant,
@@ -534,6 +536,7 @@ describe("tui session actions", () => {
     const chatLog = {
       addSystem: vi.fn(),
       clearAll: vi.fn(),
+      diffUpdate: vi.fn(),
       addUser: vi.fn(),
       finalizeAssistant: vi.fn(),
       updateAssistant,
@@ -563,6 +566,7 @@ describe("tui session actions", () => {
     const chatLog = {
       addSystem: vi.fn(),
       clearAll: vi.fn(),
+      diffUpdate: vi.fn(),
       addUser: vi.fn(),
       finalizeAssistant: vi.fn(),
       updateAssistant,
@@ -949,6 +953,7 @@ describe("tui session actions", () => {
       chatLog: {
         addSystem: vi.fn(),
         clearAll: vi.fn(),
+        diffUpdate: vi.fn(),
       } as unknown as import("./components/chat-log.js").ChatLog,
       tui: { requestRender } as unknown as import("@earendil-works/pi-tui").TUI,
       opts: { local: true },

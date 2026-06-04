@@ -1,9 +1,9 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
-import type { ShortcutBar } from "./shortcut-bar.js";
 import { theme } from "../theme/theme.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { BtwInlineMessage } from "./btw-inline-message.js";
+import type { ShortcutBar } from "./shortcut-bar.js";
 import { ToolExecutionComponent } from "./tool-execution.js";
 import { UserMessageComponent } from "./user-message.js";
 
@@ -464,7 +464,7 @@ export class ChatLog extends Container {
    * @param threshold - Minimum message count before virtualization activates. Default 500.
    */
   enableVirtualization(threshold = 500): void {
-    this.virtualThreshold = Math.max(10, Math.floor(threshold));
+    this.virtualThreshold = Math.max(1, Math.floor(threshold));
     this.virtualEnabled = true;
   }
 
@@ -551,7 +551,21 @@ export class ChatLog extends Container {
     }
 
     // Remove children after the common prefix.
-    while (this.children.length > commonPrefixLen) {
+    // commonPrefixLen counts descriptors, but children includes Spacer nodes
+    // inserted by appendNonSystem.  Map descriptor prefix → children index.
+    let childrenPrefixCount = 0;
+    let nonSpacerCount = 0;
+    for (let i = 0; i < this.children.length; i++) {
+      if (!(this.children[i] instanceof Spacer)) {
+        nonSpacerCount++;
+        if (nonSpacerCount > commonPrefixLen) {
+          break;
+        }
+      }
+      childrenPrefixCount = i + 1;
+    }
+
+    while (this.children.length > childrenPrefixCount) {
       const last = this.children[this.children.length - 1];
       if (last) {
         this.removeChild(last);
