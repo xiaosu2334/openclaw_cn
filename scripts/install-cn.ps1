@@ -13,6 +13,7 @@ param(
     [switch]$DryRun,
     [switch]$Build,
     [switch]$Source,
+    [switch]$Release,
     [string]$ReleaseTag
 )
 
@@ -352,9 +353,10 @@ function Main {
     }
 
     # Release mode: download pre-built archive
-    if ($ReleaseTag -or $ReleaseTag -eq "") {
+    if ($Release -or $ReleaseTag) {
+        $tag = if ($ReleaseTag) { $ReleaseTag } else { $null }
         try {
-            $result = Install-FromRelease -Tag $ReleaseTag
+            $result = Install-FromRelease -Tag $tag
             if ($result) { return $true }
         } catch {
             Write-Host "[!] 发行版下载失败: $_" -ForegroundColor Yellow
