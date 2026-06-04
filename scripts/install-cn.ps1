@@ -12,7 +12,8 @@ param(
     [switch]$NoGitUpdate,
     [switch]$DryRun,
     [switch]$Build,
-    [switch]$Quick
+    [switch]$Source,
+    [string]$ReleaseTag
 )
 
 $ErrorActionPreference = "Stop"
@@ -222,7 +223,7 @@ function Install-OpenClawFromGit {
             }
         }
 
-        if ($Build -or -not $Quick) {
+        if ($Build -or -not $Source) {
             Write-Host "  正在构建项目..." -ForegroundColor Gray
             $env:NODE_OPTIONS = Resolve-NodeOptionsWithMinOldSpace -NodeOptions $prevNodeOptions -MinOldSpaceMb 8192
             & $pnpmCommand build
@@ -272,6 +273,47 @@ function Get-OpenClawCommandPath {
     return $null
 }
 
+# ─── Release download ──────────────────────────────────
+function Install-FromRelease {
+    param([string]$Tag)
+    if (-not $Tag) {
+        $tagList = Invoke-RestMethod -Uri "https://api.github.com/repos/xiaosu2334/openclaw_cn/releases" -ErrorAction Stop
+        $latest = $tagList | Where-Object { -not $_.prerelease } | Select-Object -First 1
+        if (-not $latest) { throw "未找到发行版" }
+        $Tag = $latest.tag_name
+    }
+
+    $releaseUrl = "https://api.github.com/repos/xiaosu2334/openclaw_cn/releases/tags/$Tag"
+    $release = Invoke-RestMethod -Uri $releaseUrl -ErrorAction Stop
+    $asset = $release.assets | Where-Object { $_.name -eq "openclaw-cn-dist.tar.gz" }
+    if (-not $asset) { throw "未找到构建产物 openclaw-cn-dist.tar.gz" }
+
+    $installDir = if ($GitDir) { $GitDir } else { Join-Path $env:USERPROFILE "openclaw-cn" }
+    if (-not (Test-Path $installDir)) { New-Item -ItemType Directory -Force -Path $installDir | Out-Null }
+
+    Write-Host "[*] 下载 OpenClaw CN $Tag 构建版..." -ForegroundColor Yellow
+    $tmpFile = Join-Path $env:TEMP "openclaw-cn-dist.tar.gz"
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmpFile
+
+    Write-Host "  解压到 $installDir..." -ForegroundColor Gray
+    tar -xzf $tmpFile -C $installDir
+    Remove-Item $tmpFile -Force
+
+    # Create wrapper
+    $binDir = Join-Path $env:USERPROFILE ".local\bin"
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Force -Path $binDir | Out-Null }
+    $cmdPath = Join-Path $binDir $WrapperName
+    $entryPath = Join-Path $installDir "openclaw.mjs"
+    $cmdContents = "@echo off`r`nnode ""$entryPath"" %*`r`n"
+    Set-Content -Path $cmdPath -Value $cmdContents -NoNewline
+
+    if (Add-ToUserPath $binDir) {
+        Write-Host "[!] 已将 $binDir 添加到用户 PATH" -ForegroundColor Yellow
+    }
+    Write-Host "[OK] 发行版安装完成 - $Tag" -ForegroundColor Green
+    return $true
+}
+
 function Invoke-OpenClawCommand {
     param([string[]]$Arguments)
     $commandPath = Get-OpenClawCommandPath
@@ -302,10 +344,22 @@ function Run-Doctor {
 function Main {
     if ($DryRun) {
         Write-Host "[DRY RUN] 仅预览，不执行实际操作" -ForegroundColor DarkYellow
+        Write-Host "  模式: $(if ($ReleaseTag) {'Release (' + $ReleaseTag + ')'} else {'Source'})" -ForegroundColor Gray
         Write-Host "  仓库: $RepoUrl" -ForegroundColor Gray
         Write-Host "  分支: $Branch" -ForegroundColor Gray
         Write-Host "  目录: $GitDir" -ForegroundColor Gray
         return $true
+    }
+
+    # Release mode: download pre-built archive
+    if ($ReleaseTag -or $ReleaseTag -eq "") {
+        try {
+            $result = Install-FromRelease -Tag $ReleaseTag
+            if ($result) { return $true }
+        } catch {
+            Write-Host "[!] 发行版下载失败: $_" -ForegroundColor Yellow
+            Write-Host "[*] 回退到源码安装..." -ForegroundColor Yellow
+        }
     }
 
     # Step 1: Node.js

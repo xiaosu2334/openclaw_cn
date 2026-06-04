@@ -1,0 +1,81 @@
+name: Build & Release CN
+
+on:
+  push:
+    branches: [cn-main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.0.0-cn)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: cn-main
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Build
+        run: pnpm build
+
+      - name: Package build output
+        run: |
+          mkdir -p release
+          cp openclaw.mjs release/
+          cp package.json release/
+          cp -r dist release/dist 2>/dev/null || true
+          # Copy compiled dist output to release dir
+          tar -czf openclaw-cn-dist.tar.gz -C release .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclaw-cn-dist
+          path: openclaw-cn-dist.tar.gz
+          retention-days: 7
+
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: "OpenClaw CN ${{ github.event.inputs.tag }}"
+          body: |
+            OpenClaw CN 魔改版构建
+
+            - 汉化分支: `cn-main`
+            - 基于: [xiaosu2334/openclaw_cn](https://github.com/xiaosu2334/openclaw_cn)
+            - 提交: ${{ github.sha }}
+          files: openclaw-cn-dist.tar.gz
+          draft: false
+          prerelease: false
