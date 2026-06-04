@@ -1,8 +1,16 @@
 # OpenClaw CN 魔改版 Windows 安装脚本
 # GitHub: https://github.com/xiaosu2334/openclaw_cn (cn-main 分支)
 #
-# 用法:
-#   powershell -c "irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex"
+# 用法（一行命令）:
+#   irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
+#
+#   发行版（自动最新）:
+#   $env:OPENCLAW_CN_RELEASE=1; irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
+#
+#   发行版（指定版本）:
+#   $env:OPENCLAW_CN_RELEASE="v1.0.0-cn"; irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
+#
+#   PowerShell 参数模式 (用于脚本调试/高级用法):
 #   powershell -c "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1))) -Branch cn-main -NoOnboard -DryRun"
 
 param(
@@ -343,9 +351,19 @@ function Run-Doctor {
 
 # ─── Main ─────────────────────────────────────────────
 function Main {
+    # 通过环境变量检测安装模式（支持管道一键安装）
+    if (-not ($Release -or $ReleaseTag)) {
+        if ($env:OPENCLAW_CN_RELEASE -eq "1" -or $env:OPENCLAW_CN_RELEASE -eq "true") {
+            $Release = $true
+        } elseif ($env:OPENCLAW_CN_RELEASE) {
+            $Release = $true
+            $ReleaseTag = $env:OPENCLAW_CN_RELEASE
+        }
+    }
+
     if ($DryRun) {
         Write-Host "[DRY RUN] 仅预览，不执行实际操作" -ForegroundColor DarkYellow
-        Write-Host "  模式: $(if ($ReleaseTag) {'Release (' + $ReleaseTag + ')'} else {'Source'})" -ForegroundColor Gray
+        Write-Host "  模式: $(if ($ReleaseTag) {'Release (' + $ReleaseTag + ')'} elseif ($Release) {'Release (自动最新)'} else {'Source'})" -ForegroundColor Gray
         Write-Host "  仓库: $RepoUrl" -ForegroundColor Gray
         Write-Host "  分支: $Branch" -ForegroundColor Gray
         Write-Host "  目录: $GitDir" -ForegroundColor Gray

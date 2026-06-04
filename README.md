@@ -14,13 +14,20 @@
 
 ## 一键安装
 
-**Windows (PowerShell)：**
+**Windows (PowerShell) — 一行命令搞定：**
 
 ```powershell
+# 默认：源码安装（克隆仓库 + 自动安装依赖）
 irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
+
+# 发行版：下载预构建产物（无需本地编译，推荐虚拟机/低配机器使用）
+$env:OPENCLAW_CN_RELEASE=1; irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
+
+# 发行版：指定版本
+$env:OPENCLAW_CN_RELEASE="v1.0.0-cn"; irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
 ```
 
-安装后运行 `openclaw-cn` 启动。安装脚本会自动检测/安装 Node.js、pnpm、Git，克隆并构建整个项目。
+安装后运行 `openclaw-cn` 启动。脚本会自动检测/安装 Node.js、pnpm、Git。
 
 **macOS / Linux / WSL：**
 
