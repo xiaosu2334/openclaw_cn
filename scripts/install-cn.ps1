@@ -1,16 +1,12 @@
 # OpenClaw CN 魔改版 Windows 安装脚本
 # GitHub: https://github.com/xiaosu2334/openclaw_cn (cn-main 分支)
 #
-# 用法（一行命令）:
+# 用法（一行命令搞定，运行后按菜单选择即可）:
 #   irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
 #
-#   发行版（自动最新）:
-#   $env:OPENCLAW_CN_RELEASE=1; irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
-#
-#   发行版（指定版本）:
-#   $env:OPENCLAW_CN_RELEASE="v1.0.0-cn"; irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1 | iex
-#
-#   PowerShell 参数模式 (用于脚本调试/高级用法):
+# 高级用法（跳过交互直接指定模式）:
+#   powershell -c "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1))) -Release"
+#   powershell -c "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1))) -ReleaseTag v1.0.0-cn"
 #   powershell -c "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xiaosu2334/openclaw_cn/cn-main/scripts/install-cn.ps1))) -Branch cn-main -NoOnboard -DryRun"
 
 param(
@@ -351,14 +347,49 @@ function Run-Doctor {
 
 # ─── Main ─────────────────────────────────────────────
 function Main {
-    # 通过环境变量检测安装模式（支持管道一键安装）
-    if (-not ($Release -or $ReleaseTag)) {
-        if ($env:OPENCLAW_CN_RELEASE -eq "1" -or $env:OPENCLAW_CN_RELEASE -eq "true") {
-            $Release = $true
-        } elseif ($env:OPENCLAW_CN_RELEASE) {
-            $Release = $true
-            $ReleaseTag = $env:OPENCLAW_CN_RELEASE
+
+    # 无参数运行时弹出交互菜单（一行 irm ... | iex 场景）
+    if (-not ($Release -or $ReleaseTag -or $PSBoundParameters.ContainsKey("Release") -or $PSBoundParameters.ContainsKey("ReleaseTag"))) {
+        Write-Host ""
+        Write-Host "════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host "  OpenClaw CN 安装模式" -ForegroundColor Cyan
+        Write-Host "════════════════════════════════════════" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  [1] 源码安装" -ForegroundColor White
+        Write-Host "      克隆仓库 + 自动安装依赖（适合开发调试）" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  [2] 发行版安装（推荐）" -ForegroundColor White
+        Write-Host "      下载预构建产物，无需本地编译（适合快速使用）" -ForegroundColor DarkGray
+        Write-Host ""
+
+        do {
+            $modeChoice = Read-Host "  请输入数字选择模式 (1/2)"
+        } until ($modeChoice -eq "1" -or $modeChoice -eq "2")
+
+        if ($modeChoice -eq "2") {
+            Write-Host ""
+            Write-Host "  版本选择：" -ForegroundColor Cyan
+            Write-Host "    [1] 自动获取最新发行版（推荐）" -ForegroundColor White
+            Write-Host "    [2] 手动指定版本号" -ForegroundColor White
+
+            do {
+                $verChoice = Read-Host "  请输入数字 (1/2)"
+            } until ($verChoice -eq "1" -or $verChoice -eq "2")
+
+            if ($verChoice -eq "2") {
+                $ReleaseTag = Read-Host "  请输入版本号（如 v1.0.0-cn）"
+                if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
+                    Write-Host "[!] 版本号不能为空，回退到自动最新" -ForegroundColor Yellow
+                    $ReleaseTag = $null
+                }
+            }
+            $script:Release = $true
+        } else {
+            $script:Release = $false
         }
+        Write-Host ""
+        Write-Host "  已选择: $(if ($Release) { if ($ReleaseTag) { "发行版 v$ReleaseTag" } else { "发行版（自动最新）" } } else { "源码安装" })" -ForegroundColor Green
+        Write-Host ""
     }
 
     if ($DryRun) {
