@@ -52,6 +52,22 @@ function extractText(result?: ToolResult): string {
   return lines.join("\n").trim();
 }
 
+/**
+ * Build a one-line summary for the collapsed state (P1-4).
+ */
+function buildCollapsedSummary(
+  toolName: string,
+  args: unknown,
+  result?: ToolResult,
+): string {
+  const display = resolveToolDisplay({ name: toolName, args });
+  const detail = formatToolDetail(display) || toolName;
+  const status = result
+    ? (result.content && result.content.length > 0 ? " ✓" : " ✓")
+    : " …";
+  return `${display.emoji} ${detail}${status}`;
+}
+
 export class ToolExecutionComponent extends Container {
   private box: Box;
   private header: Text;
@@ -92,6 +108,19 @@ export class ToolExecutionComponent extends Container {
     this.refresh();
   }
 
+  /**
+   * P1-4: Toggle the expanded/collapsed state for this individual tool.
+   */
+  toggleExpanded(): void {
+    this.expanded = !this.expanded;
+    this.refresh();
+  }
+
+  /** Returns true if the tool is currently expanded. */
+  isExpanded(): boolean {
+    return this.expanded;
+  }
+
   setResult(result: ToolResult | undefined, opts?: { isError?: boolean }) {
     this.result = result;
     this.isPartial = false;
@@ -117,6 +146,17 @@ export class ToolExecutionComponent extends Container {
       name: this.toolName,
       args: this.args,
     });
+
+    if (!this.expanded) {
+      // P1-4: Collapsed state shows a one-line summary.
+      const summary = buildCollapsedSummary(this.toolName, this.args, this.result);
+      this.header.setText(theme.toolTitle(theme.bold(summary)));
+      this.argsLine.setText(theme.dim(" "));
+      this.output.setText("");
+      return;
+    }
+
+    // Expanded state: full display.
     const title = `${display.emoji} ${display.label}${this.isPartial ? " (running)" : ""}`;
     this.header.setText(theme.toolTitle(theme.bold(title)));
 

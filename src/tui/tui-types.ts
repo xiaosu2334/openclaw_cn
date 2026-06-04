@@ -127,6 +127,9 @@ export type GatewayStatusSummary = {
   };
 };
 
+/** Waiting display mode: static fixed text or shimmer animation. */
+export type WaitingMode = "static" | "shimmer";
+
 export type TuiStateAccess = {
   agentDefaultId: string;
   sessionMainKey: string;
@@ -150,4 +153,8 @@ export type TuiStateAccess = {
   activityStatus: string;
   statusTimeout: ReturnType<typeof setTimeout> | null;
   lastCtrlCAt: number;
+  /** Whether the bottom shortcut bar is visible. Default true. */
+  shortcutBarVisible: boolean;
+  /** How to display the "waiting for model" status. */
+  waitingMode: WaitingMode;
 };

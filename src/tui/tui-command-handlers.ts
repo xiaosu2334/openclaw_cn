@@ -313,6 +313,16 @@ export function createCommandHandlers(context: CommandHandlerContext) {
           state.showThinking = value === "on";
           void loadHistory();
         }
+        if (client.patchConfig) {
+          void client.patchConfig({
+            raw: JSON.stringify({
+              tui: {
+                toolsExpanded: state.toolsExpanded,
+                showThinking: state.showThinking,
+              },
+            }),
+          }).catch(() => { /* best-effort persist */ });
+        }
         tui.requestRender();
       },
       () => {

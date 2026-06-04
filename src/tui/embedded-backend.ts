@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { SessionsPatchResult } from "../../packages/gateway-protocol/src/index.js";
 import { agentCommandFromIngress } from "../agents/agent-command.js";
 import { resolveDefaultAgentId, resolveSessionAgentId } from "../agents/agent-scope.js";
@@ -11,7 +14,7 @@ import {
 } from "../agents/model-selection.js";
 import { parseGoalCommand } from "../auto-reply/reply/commands-goal.js";
 import { createDefaultDeps } from "../cli/deps.js";
-import { getRuntimeConfig } from "../config/config.js";
+import { getRuntimeConfig, mutateConfigFile, parseConfigJson5 } from "../config/config.js";
 import {
   clearSessionGoal,
   createSessionGoal,
@@ -66,6 +69,7 @@ import { normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
 import { resolveLocalRunShutdownGraceMs } from "./local-run-shutdown.js";
+import { getJsonParseWorkerPool } from "./tui-json-parser.js";
 import type {
   ChatSendOptions,
   TuiAgentsList,
@@ -395,7 +399,11 @@ export class EmbeddedTuiBackend implements TuiBackend {
       const requestedAgentId = opts.agentId ? normalizeAgentId(opts.agentId) : defaultAgentId;
       const runAgentId = run.agentId ? normalizeAgentId(run.agentId) : defaultAgentId;
       if (runAgentId !== requestedAgentId) {
-        return { ok: true, aborted: false };
+        return {
+          ok: true,
+          aborted: false,
+          errorMessage: "无法中止：当前agent与run不匹配",
+        };
       }
     }
     if (!this.isAbortableRun(opts.runId, run)) {
@@ -420,14 +428,38 @@ export class EmbeddedTuiBackend implements TuiBackend {
     const resolvedSessionModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
     const max = Math.min(1000, typeof opts.limit === "number" ? opts.limit : 200);
     const maxHistoryBytes = getMaxChatHistoryMessagesBytes();
-    const localMessages =
-      sessionId && storePath
-        ? await readSessionMessagesAsync(sessionId, storePath, entry?.sessionFile, {
+    const LARGE_FILE_THRESHOLD = 1_048_576; // 1 MB threshold for worker pool
+    let localMessages: Record<string, unknown>[] = [];
+
+    if (sessionId && storePath) {
+      // P1-2: For large session files, use async JSON parsing via worker pool
+      // to avoid blocking the main TUI render loop.
+      const sessionFile = entry?.sessionFile ?? `session-${sessionId}.json`;
+      const sessionFilePath = path.join(storePath, sessionFile);
+      try {
+        const stat = await fs.stat(sessionFilePath);
+        if (stat.size > LARGE_FILE_THRESHOLD) {
+          const buffer = await fs.readFile(sessionFilePath);
+          const parsed = await getJsonParseWorkerPool().parseAsync(buffer);
+          if (Array.isArray(parsed)) {
+            localMessages = parsed as Record<string, unknown>[];
+          }
+        } else {
+          localMessages = await readSessionMessagesAsync(sessionId, storePath, entry?.sessionFile, {
             mode: "recent",
             maxMessages: max,
             maxBytes: Math.max(maxHistoryBytes * 2, 1024 * 1024),
-          })
-        : [];
+          });
+        }
+      } catch {
+        // Fallback: use standard async reader if worker pool or stat fails.
+        localMessages = await readSessionMessagesAsync(sessionId, storePath, entry?.sessionFile, {
+          mode: "recent",
+          maxMessages: max,
+          maxBytes: Math.max(maxHistoryBytes * 2, 1024 * 1024),
+        });
+      }
+    }
     const rawMessages = augmentChatHistoryWithCliSessionImports({
       entry,
       provider: resolvedSessionModel.provider,
@@ -660,6 +692,30 @@ export class EmbeddedTuiBackend implements TuiBackend {
           text: "Usage: /goal [status] | /goal start <objective> | /goal pause|resume|complete|block|clear",
         };
     }
+  }
+
+  async patchConfig(opts: { raw: string; baseHash?: string }) {
+    const patch = parseConfigJson5(opts.raw);
+    if (!patch.ok) return { ok: false };
+    const result = await mutateConfigFile({
+      baseHash: opts.baseHash,
+      mutate: (draft) => {
+        if (patch.parsed && typeof patch.parsed === "object") {
+          const p = patch.parsed as Record<string, unknown>;
+          if (p.tui && typeof p.tui === "object") {
+            (draft as Record<string, unknown>).tui = {
+              ...((draft as Record<string, unknown>).tui as Record<string, unknown> ?? {}),
+              ...(p.tui as Record<string, unknown>),
+            };
+          }
+        }
+      },
+    });
+    return {
+      ok: true,
+      path: result.path,
+      config: (result.nextConfig as Record<string, unknown>).tui,
+    };
   }
 
   private findQueuedSessionRunPromise(params: {

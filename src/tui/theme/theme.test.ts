@@ -267,3 +267,284 @@ describe("list themes", () => {
     expect(stripAnsi(searchableSelectListTheme.matchHighlight("match"))).toBe("match");
   });
 });
+
+// ── Warm-tone palette assertions (PRD §4.1) ─────────────────────────────────
+
+describe("dark palette (warm-tone redesign)", () => {
+  it("uses warm-tone dark background", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.bg).toBe("#1E1C1A");
+    expect(mod.darkPalette.text).toBe("#E8DDD0");
+  });
+
+  it("uses warm-tone accent colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.accent).toBe("#D4A853");
+    expect(mod.darkPalette.accentSoft).toBe("#5C4A2E");
+  });
+
+  it("defines warm border colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.border).toBe("#4A4238");
+    expect(mod.darkPalette.codeBorder).toBe("#3D352A");
+  });
+
+  it("defines user message colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.userBg).toBe("#3D352A");
+    expect(mod.darkPalette.userText).toBe("#E8DDD0");
+  });
+
+  it("defines tool state colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.toolPendingBg).toBe("#2D2822");
+    expect(mod.darkPalette.toolSuccessBg).toBe("#1E2A22");
+    expect(mod.darkPalette.toolErrorBg).toBe("#2D1E1E");
+  });
+
+  it("defines code and link colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.code).toBe("#D4A853");
+    expect(mod.darkPalette.link).toBe("#7DC4A4");
+    expect(mod.darkPalette.codeBlock).toBe("#252220");
+  });
+
+  it("defines shortcut bar colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.shortcutBarBg).toBe("#252220");
+    expect(mod.darkPalette.shortcutKey).toBe("#D4A853");
+    expect(mod.darkPalette.shortcutHint).toBe("#6E6058");
+  });
+
+  it("has shortcutKey and shortcutHint theme functions", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    // shortcutKey uses accent color
+    const keyOutput = mod.theme.shortcutKey("Ctrl+O");
+    expect(stripAnsi(keyOutput)).toBe("Ctrl+O");
+    // shortcutHint uses dim-like color
+    const hintOutput = mod.theme.shortcutHint("|");
+    expect(stripAnsi(hintOutput)).toBe("|");
+  });
+
+  it("defines error and success colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    expect(mod.darkPalette.error).toBe("#E0735A");
+    expect(mod.darkPalette.success).toBe("#7DC4A4");
+  });
+});
+
+describe("light palette (warm-tone redesign)", () => {
+  it("uses warm cream background", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "light" });
+    expect(mod.lightPalette.bg).toBe("#FBF7F0");
+    expect(mod.lightPalette.text).toBe("#3D3226");
+  });
+
+  it("defines light mode shortcut bar colors", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "light" });
+    expect(mod.lightPalette.shortcutBarBg).toBe("#F0E8D8");
+    expect(mod.lightPalette.shortcutKey).toBe("#B8751F");
+    expect(mod.lightPalette.shortcutHint).toBe("#A09080");
+  });
+
+  it("uses warm accent for light mode", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "light" });
+    expect(mod.lightPalette.accent).toBe("#B8751F");
+    expect(mod.lightPalette.accentSoft).toBe("#D4B896");
+  });
+});
+
+// ── Custom theme / merge / validation tests ─────────────────────────────────
+
+describe("custom-theme utilities", () => {
+  const { mergeCustomTheme, mergePalette, validateHexColor, validateCustomPalette } =
+    await import("./custom-theme.js");
+
+  describe("validateHexColor", () => {
+    it("accepts valid 6-digit hex colors", () => {
+      expect(validateHexColor("#1E1C1A")).toBe(true);
+      expect(validateHexColor("#D4A853")).toBe(true);
+      expect(validateHexColor("#abcdef")).toBe(true);
+      expect(validateHexColor("#ABCDEF")).toBe(true);
+      expect(validateHexColor("#000000")).toBe(true);
+      expect(validateHexColor("#FFFFFF")).toBe(true);
+    });
+
+    it("rejects invalid hex colors", () => {
+      expect(validateHexColor("")).toBe(false);
+      expect(validateHexColor("not-a-color")).toBe(false);
+      expect(validateHexColor("#123")).toBe(false); // 3 digits
+      expect(validateHexColor("#12345")).toBe(false); // 5 digits
+      expect(validateHexColor("#1234567")).toBe(false); // 7 digits
+      expect(validateHexColor("123456")).toBe(false); // no #
+      expect(validateHexColor("#GGGGGG")).toBe(false); // invalid hex chars
+      expect(validateHexColor("#-12345")).toBe(false);
+    });
+
+    it("rejects non-string values", () => {
+      expect(validateHexColor(undefined as unknown as string)).toBe(false);
+      expect(validateHexColor(null as unknown as string)).toBe(false);
+      expect(validateHexColor(123 as unknown as string)).toBe(false);
+    });
+  });
+
+  describe("validateCustomPalette", () => {
+    it("returns empty array for all-valid palette", () => {
+      expect(validateCustomPalette({ text: "#E8DDD0", bg: "#1E1C1A" })).toEqual([]);
+    });
+
+    it("returns invalid keys for bad colors", () => {
+      expect(validateCustomPalette({ text: "bad", bg: "#1E1C1A" })).toEqual(["text"]);
+      expect(validateCustomPalette({ text: "bad", bg: "also-bad" })).toEqual(["text", "bg"]);
+    });
+  });
+
+  describe("mergeCustomTheme", () => {
+    it("merges custom values over base palette", () => {
+      const base = { text: "#000000", bg: "#FFFFFF" } as import("./theme.js").Palette;
+      const result = mergeCustomTheme(base, { text: "#E8DDD0" });
+      expect(result.text).toBe("#E8DDD0");
+      expect(result.bg).toBe("#FFFFFF"); // unchanged
+    });
+
+    it("ignores empty string overrides", () => {
+      const base = { text: "#000000", bg: "#FFFFFF" } as import("./theme.js").Palette;
+      const result = mergeCustomTheme(base, { text: "" });
+      expect(result.text).toBe("#000000"); // unchanged
+    });
+
+    it("returns a new object (immutable)", () => {
+      const base = { text: "#000000", bg: "#FFFFFF" } as import("./theme.js").Palette;
+      const result = mergeCustomTheme(base, { text: "#E8DDD0" });
+      expect(result).not.toBe(base);
+    });
+  });
+
+  describe("mergePalette (deep merge)", () => {
+    it("merges custom values over base palette (deep merge)", () => {
+      const base = { text: "#000000", bg: "#FFFFFF" } as import("./theme.js").Palette;
+      const result = mergePalette(base, { text: "#E8DDD0" });
+      expect(result.text).toBe("#E8DDD0");
+      expect(result.bg).toBe("#FFFFFF");
+    });
+
+    it("handles empty custom palette", () => {
+      const base = { text: "#000000", bg: "#FFFFFF" } as import("./theme.js").Palette;
+      const result = mergePalette(base, {});
+      expect(result.text).toBe("#000000");
+      expect(result.bg).toBe("#FFFFFF");
+    });
+
+    it("overrides multiple keys at once", () => {
+      const base = {
+        text: "#000",
+        bg: "#FFF",
+        accent: "#00F",
+      } as import("./theme.js").Palette;
+      const result = mergePalette(base, { text: "#111", accent: "#222" });
+      expect(result.text).toBe("#111");
+      expect(result.accent).toBe("#222");
+      expect(result.bg).toBe("#FFF");
+    });
+  });
+});
+
+// ── CustomThemeConfig / loadCustomTheme tests ────────────────────────────────
+
+describe("loadCustomTheme", () => {
+  it("does nothing when custom config is null", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    const originalBg = mod.palette.bg;
+    mod.loadCustomTheme(null);
+    expect(mod.palette.bg).toBe(originalBg);
+  });
+
+  it("does nothing when custom config is undefined", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    const originalBg = mod.palette.bg;
+    mod.loadCustomTheme(undefined);
+    expect(mod.palette.bg).toBe(originalBg);
+  });
+
+  it("applies darkPalette overrides when in dark mode", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    const originalBg = mod.palette.bg;
+    mod.loadCustomTheme({
+      darkPalette: { bg: "#111111" },
+    });
+    expect(mod.palette.bg).toBe("#111111");
+    // Restore for other tests (palette is a module-level mutable object).
+    mod.loadCustomTheme({
+      darkPalette: { bg: originalBg },
+    });
+  });
+
+  it("applies lightPalette overrides when in light mode", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "light" });
+    const originalText = mod.palette.text;
+    mod.loadCustomTheme({
+      lightPalette: { text: "#222222" },
+    });
+    expect(mod.palette.text).toBe("#222222");
+    mod.loadCustomTheme({
+      lightPalette: { text: originalText },
+    });
+  });
+
+  it("ignores lightPalette overrides when in dark mode", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    const originalBg = mod.palette.bg;
+    mod.loadCustomTheme({
+      lightPalette: { bg: "#999999" },
+    });
+    // Should stay unchanged because we're in dark mode.
+    expect(mod.palette.bg).toBe(originalBg);
+  });
+
+  it("filters out invalid hex colors in custom overrides", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "dark" });
+    const originalBg = mod.palette.bg;
+    mod.loadCustomTheme({
+      darkPalette: { bg: "not-a-color" },
+    });
+    // Should stay unchanged because the override was invalid.
+    expect(mod.palette.bg).toBe(originalBg);
+  });
+
+  it("ignores darkPalette overrides when in light mode", async () => {
+    const mod = await importThemeWithEnv({ OPENCLAW_THEME: "light" });
+    const originalBg = mod.palette.bg;
+    mod.loadCustomTheme({
+      darkPalette: { bg: "#111111" },
+    });
+    expect(mod.palette.bg).toBe(originalBg);
+  });
+
+  it("shortcutBarVisible flag is extractable", async () => {
+    const mod = await import("./custom-theme.js");
+    const flags = mod.extractCustomTuiFlags({
+      shortcutBarVisible: false,
+      waitingMode: "static",
+    });
+    expect(flags.shortcutBarVisible).toBe(false);
+    expect(flags.waitingMode).toBe("static");
+  });
+
+  it("extractCustomTuiFlags returns empty for null input", async () => {
+    const mod = await import("./custom-theme.js");
+    expect(mod.extractCustomTuiFlags(null)).toEqual({});
+    expect(mod.extractCustomTuiFlags(undefined)).toEqual({});
+  });
+});
+
+// ── COLORFGBG length guard (max 64 chars) ──────────────────────────────────
+
+describe("COLORFGBG length guard", () => {
+  it("ignores COLORFGBG strings longer than 64 characters", async () => {
+    const mod = await importThemeWithEnv({
+      OPENCLAW_THEME: undefined,
+      COLORFGBG: "0;".repeat(40), // > 64 chars
+    });
+    expect(mod.lightMode).toBe(false);
+  });
+});

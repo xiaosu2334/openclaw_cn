@@ -29,8 +29,10 @@ import {
 import { getSlashCommands } from "./commands.js";
 import { ChatLog } from "./components/chat-log.js";
 import { CustomEditor } from "./components/custom-editor.js";
+import { ShortcutBar } from "./components/shortcut-bar.js";
 import { resolveLocalRunShutdownGraceMs } from "./local-run-shutdown.js";
-import { editorTheme, theme } from "./theme/theme.js";
+import { editorTheme, loadCustomTheme, theme } from "./theme/theme.js";
+import { extractCustomTuiFlags } from "./theme/custom-theme.js";
 import type { TuiBackend } from "./tui-backend.js";
 import { createCommandHandlers } from "./tui-command-handlers.js";
 import { createEventHandlers } from "./tui-event-handlers.js";
@@ -57,6 +59,7 @@ import type {
   TuiOptions,
   TuiResult,
   TuiStateAccess,
+  WaitingMode,
 } from "./tui-types.js";
 import { buildWaitingStatusMessage, defaultWaitingPhrases } from "./tui-waiting.js";
 
@@ -484,6 +487,17 @@ function resolveEmptySessionInfoDefaults(config: OpenClawConfig): SessionInfo {
 export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   const isLocalMode = opts.local === true || opts.backend !== undefined;
   const config = opts.config ?? getRuntimeConfig({ skipPluginValidation: !isLocalMode });
+  // Apply custom theme from openclaw.json's tui section before any rendering.
+  loadCustomTheme(config.tui as import("./theme/theme.js").CustomThemeConfig | undefined);
+  const customTuiFlags = extractCustomTuiFlags(
+    config.tui as import("./theme/theme.js").CustomThemeConfig | undefined | null,
+  );
+  if (customTuiFlags.shortcutBarVisible !== undefined) {
+    shortcutBarVisible = customTuiFlags.shortcutBarVisible;
+  }
+  if (customTuiFlags.waitingMode !== undefined) {
+    waitingMode = customTuiFlags.waitingMode;
+  }
   const emptySessionInfoDefaults = resolveEmptySessionInfoDefaults(config);
   const initialSessionInput = (opts.session ?? "").trim();
   let sessionScope: SessionScope = (config.session?.scope ?? "per-sender") as SessionScope;
@@ -526,6 +540,8 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   let lastCtrlCAt = 0;
   let exitRequested = false;
   let exitResult: TuiResult = { exitReason: "exit" };
+  let shortcutBarVisible = true;
+  let waitingMode: WaitingMode = "static";
   let activityStatus = "idle";
   let connectionStatus = isLocalMode ? "starting local runtime" : "connecting";
   let statusTimeout: NodeJS.Timeout | null = null;
@@ -660,6 +676,18 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     set lastCtrlCAt(value) {
       lastCtrlCAt = value;
     },
+    get shortcutBarVisible() {
+      return shortcutBarVisible;
+    },
+    set shortcutBarVisible(value) {
+      shortcutBarVisible = value;
+    },
+    get waitingMode() {
+      return waitingMode;
+    },
+    set waitingMode(value) {
+      waitingMode = value;
+    },
   };
 
   const noteLocalRunId = (runId: string) => {
@@ -745,10 +773,18 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   const footer = new Text("", 1, 0);
   const chatLog = new ChatLog();
   const editor = new CustomEditor(tui, editorTheme);
+  const shortcutBar = new ShortcutBar();
+  // P2-4: Enable message fade-in animation and wire render callback.
+  chatLog.setMessageAnimation(true);
+  chatLog.setOnRequestRender(() => tui.requestRender());
+  // Link shortcutBar to chatLog for P2-3 integration.
+  chatLog.setShortcutBar?.(shortcutBar);
   const root = new Container();
+  // P1-4: Adjusted layout: header → chatLog → status → shortcutBar → footer → editor
   root.addChild(header);
   root.addChild(chatLog);
   root.addChild(statusContainer);
+  root.addChild(shortcutBar);
   root.addChild(footer);
   root.addChild(editor);
 
@@ -993,6 +1029,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
           elapsed,
           connectionStatus,
           phrases: waitingPhrase ? [waitingPhrase] : undefined,
+          waitingMode,
         }),
       );
       return;
@@ -1436,6 +1473,11 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     chatLog.setToolsExpanded(toolsExpanded);
     setActivityStatus(toolsExpanded ? "tools expanded" : "tools collapsed");
     tui.requestRender();
+    if (client.patchConfig) {
+      void client.patchConfig({
+        raw: JSON.stringify({ tui: { toolsExpanded, showThinking } }),
+      }).catch(() => {});
+    }
   };
   editor.onCtrlL = () => {
     void openModelSelector();
@@ -1449,6 +1491,11 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   editor.onCtrlT = () => {
     showThinking = !showThinking;
     void loadHistory();
+    if (client.patchConfig) {
+      void client.patchConfig({
+        raw: JSON.stringify({ tui: { toolsExpanded, showThinking } }),
+      }).catch(() => {});
+    }
   };
 
   tui.addInputListener((data) => {

@@ -125,33 +125,28 @@ describe("createEditorSubmitHandler", () => {
 });
 
 describe("createSubmitBurstCoalescer", () => {
-  it("coalesces rapid single-line submits into one multiline submit when enabled", () => {
-    vi.useFakeTimers();
+  // P0-1: Single-line submissions (no "\n") bypass the burst coalescer entirely
+  // and are submitted immediately. Only multi-line text goes through coalescing.
+  it("submits single-line text immediately without burst when enabled (P0-1)", () => {
     const submit = vi.fn();
-    let now = 1_000;
     const onSubmit = createSubmitBurstCoalescer({
       submit,
       enabled: true,
       burstWindowMs: 50,
-      now: () => now,
     });
 
     onSubmit("Line 1");
-    now += 10;
     onSubmit("Line 2");
-    now += 10;
     onSubmit("Line 3");
 
-    expect(submit).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(50);
-
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit).toHaveBeenCalledWith("Line 1\nLine 2\nLine 3");
-    vi.useRealTimers();
+    // Each single-line submit goes through immediately.
+    expect(submit).toHaveBeenCalledTimes(3);
+    expect(submit).toHaveBeenNthCalledWith(1, "Line 1");
+    expect(submit).toHaveBeenNthCalledWith(2, "Line 2");
+    expect(submit).toHaveBeenNthCalledWith(3, "Line 3");
   });
 
-  it("passes through immediately when disabled", () => {
+  it("submits single-line text immediately without burst when disabled (P0-1)", () => {
     const submit = vi.fn();
     const onSubmit = createSubmitBurstCoalescer({
       submit,
@@ -164,6 +159,78 @@ describe("createSubmitBurstCoalescer", () => {
     expect(submit).toHaveBeenCalledTimes(2);
     expect(submit).toHaveBeenNthCalledWith(1, "Line 1");
     expect(submit).toHaveBeenNthCalledWith(2, "Line 2");
+  });
+
+  it("submits multi-line text (with \\n) immediately without burst window (P0-1)", () => {
+    const submit = vi.fn();
+    const onSubmit = createSubmitBurstCoalescer({
+      submit,
+      enabled: true,
+      burstWindowMs: 50,
+    });
+
+    onSubmit("Line 1\nLine 2\nLine 3");
+
+    // Multi-line text (pasted blocks) goes through immediately.
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith("Line 1\nLine 2\nLine 3");
+  });
+
+  it("flushes pending burst before submitting single-line when enabled (P0-1)", () => {
+    vi.useFakeTimers();
+    const submit = vi.fn();
+    let now = 1_000;
+    const onSubmit = createSubmitBurstCoalescer({
+      submit,
+      enabled: true,
+      burstWindowMs: 50,
+      now: () => now,
+    });
+
+    // Multi-line first (goes into burst but immediately flushed in new logic).
+    onSubmit("Multi\nLine");
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenNthCalledWith(1, "Multi\nLine");
+
+    // Single-line after.
+    onSubmit("Single");
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenNthCalledWith(2, "Single");
+
+    vi.useRealTimers();
+  });
+
+  it("flushes any pending burst when a single-line arrives mid-burst (P0-1)", () => {
+    const submit = vi.fn();
+    const onSubmit = createSubmitBurstCoalescer({
+      submit,
+      enabled: true,
+    });
+
+    onSubmit("Pasted\nBlock");
+    onSubmit("Single");
+
+    // Both go through immediately in new P0-1 logic.
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenNthCalledWith(1, "Pasted\nBlock");
+    expect(submit).toHaveBeenNthCalledWith(2, "Single");
+  });
+
+  it("submits immediately when enabled is false regardless of content (P0-1)", () => {
+    const submit = vi.fn();
+    const onSubmit = createSubmitBurstCoalescer({
+      submit,
+      enabled: false,
+    });
+
+    onSubmit("Single");
+    onSubmit("Multi\nLine");
+    onSubmit("Another single");
+
+    expect(submit).toHaveBeenCalledTimes(3);
+    expect(submit).toHaveBeenNthCalledWith(1, "Single");
+    expect(submit).toHaveBeenNthCalledWith(2, "Multi\nLine");
+    expect(submit).toHaveBeenNthCalledWith(3, "Another single");
   });
 });
 

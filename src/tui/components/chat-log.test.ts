@@ -247,3 +247,254 @@ describe("ChatLog", () => {
     expect(chatLog.countPendingUsers()).toBe(1);
   });
 });
+
+// ── P0-4: diffUpdate incremental history tests ──────────────────────────
+
+describe("ChatLog diffUpdate (P0-4)", () => {
+  it("does nothing when the new descriptor list is identical to the current snapshot", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.addSystem("session agent:main:main");
+    chatLog.addUser("hello");
+    chatLog.addSystem("done");
+
+    const before = chatLog.children.length;
+
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "hello" },
+      { kind: "system", text: "done" },
+    ]);
+
+    // Same list: no changes expected.
+    expect(chatLog.children.length).toBe(before);
+  });
+
+  it("appends only new messages when the tail differs (appends new suffix)", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "hello" },
+    ]);
+
+    const before = chatLog.children.length;
+
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "hello" },
+      { kind: "assistant", text: "hi there" },
+    ]);
+
+    // Should only append the new assistant message.
+    expect(chatLog.children.length).toBe(before + 1);
+    const rendered = normalizeTestText(chatLog.render(120).join("\n"));
+    expect(rendered).toContain("hi there");
+    expect(rendered).toContain("hello");
+  });
+
+  it("rebuilds from the difference point when a message is inserted in the middle", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "first" },
+      { kind: "assistant", text: "reply1" },
+      { kind: "user", text: "third" },
+    ]);
+
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "first" },
+      { kind: "assistant", text: "reply1" },
+      { kind: "user", text: "second" }, // inserted
+      { kind: "user", text: "third" },
+    ]);
+
+    const rendered = normalizeTestText(chatLog.render(120).join("\n"));
+    expect(rendered).toContain("first");
+    expect(rendered).toContain("second");
+    expect(rendered).toContain("third");
+  });
+
+  it("removes messages when the new list has fewer entries (deletion)", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "first" },
+      { kind: "user", text: "second" },
+      { kind: "user", text: "third" },
+    ]);
+
+    const before = chatLog.children.length;
+
+    chatLog.diffUpdate([
+      { kind: "system", text: "session agent:main:main" },
+      { kind: "user", text: "first" },
+    ]);
+
+    // Should have fewer children after deletion.
+    expect(chatLog.children.length).toBeLessThan(before);
+    const rendered = normalizeTestText(chatLog.render(120).join("\n"));
+    expect(rendered).toContain("first");
+    expect(rendered).not.toContain("second");
+    expect(rendered).not.toContain("third");
+  });
+
+  it("handles empty descriptor list (clears all)", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.addSystem("session agent:main:main");
+    chatLog.addUser("hello");
+
+    chatLog.diffUpdate([]);
+
+    expect(chatLog.children.length).toBe(0);
+  });
+
+  it("handles completely different descriptor list (full rebuild)", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.diffUpdate([
+      { kind: "system", text: "old session" },
+      { kind: "user", text: "old message" },
+    ]);
+
+    chatLog.diffUpdate([
+      { kind: "system", text: "new session" },
+      { kind: "user", text: "new message" },
+    ]);
+
+    const rendered = normalizeTestText(chatLog.render(120).join("\n"));
+    expect(rendered).not.toContain("old session");
+    expect(rendered).not.toContain("old message");
+    expect(rendered).toContain("new session");
+    expect(rendered).toContain("new message");
+  });
+});
+
+// ── Message spacing and layout tests ────────────────────────────────────
+
+describe("ChatLog message spacing (P1-4)", () => {
+  it("adds spacer between non-system messages for visual separation", () => {
+    const chatLog = new ChatLog(40);
+
+    chatLog.addUser("hello");
+    chatLog.addSystem("notice");
+    chatLog.addUser("world");
+
+    const rendered = chatLog.render(120).join("\n");
+    expect(rendered).toContain("hello");
+    expect(rendered).toContain("world");
+    expect(rendered).toContain("notice");
+    expect(chatLog.children.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ── Virtualization tests (P2-2) ────────────────────────────────────────
+
+describe("ChatLog virtualization (P2-2)", () => {
+  it("is not virtualized by default", () => {
+    const chatLog = new ChatLog(40);
+    expect(chatLog.isVirtualized()).toBe(false);
+  });
+
+  it("activates virtualization when enabled and message count exceeds threshold", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.enableVirtualization(5);
+    // Add enough descriptors to exceed threshold.
+    for (let i = 0; i < 10; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    expect(chatLog.getMessageCount()).toBe(10);
+    expect(chatLog.isVirtualized()).toBe(true);
+  });
+
+  it("does not activate when message count is below threshold", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.enableVirtualization(50);
+    for (let i = 0; i < 10; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    expect(chatLog.isVirtualized()).toBe(false);
+  });
+
+  it("returns all children when not virtualized", () => {
+    const chatLog = new ChatLog(40);
+    for (let i = 0; i < 10; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    const visible = chatLog.getVisibleChildren(5);
+    expect(visible.length).toBe(10);
+  });
+
+  it("returns viewport window when virtualized", () => {
+    const chatLog = new ChatLog(200);
+    chatLog.enableVirtualization(5);
+    for (let i = 0; i < 20; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    const visible = chatLog.getVisibleChildren(5);
+    expect(visible.length).toBe(5);
+  });
+
+  it("respects scrollOffset for virtualized viewport", () => {
+    const chatLog = new ChatLog(200);
+    chatLog.enableVirtualization(5);
+    for (let i = 0; i < 20; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    chatLog.setScrollOffset(10);
+    const visible = chatLog.getVisibleChildren(5);
+    expect(visible.length).toBe(5);
+    const rendered = normalizeTestText(
+      visible.map((c) => c.render(120).join("\n")).join("\n"),
+    );
+    expect(rendered).toContain("msg-10");
+    expect(rendered).toContain("msg-14");
+  });
+
+  it("clamps scrollOffset to valid range", () => {
+    const chatLog = new ChatLog(200);
+    chatLog.enableVirtualization(5);
+    for (let i = 0; i < 20; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    chatLog.setScrollOffset(999); // beyond the end
+    const visible = chatLog.getVisibleChildren(5);
+    expect(visible.length).toBe(5);
+    // Should show the last 5.
+    const rendered = normalizeTestText(
+      visible.map((c) => c.render(120).join("\n")).join("\n"),
+    );
+    expect(rendered).toContain("msg-15");
+    expect(rendered).toContain("msg-19");
+  });
+
+  it("disables virtualization", () => {
+    const chatLog = new ChatLog(200);
+    chatLog.enableVirtualization(5);
+    for (let i = 0; i < 20; i++) {
+      chatLog.addSystem(`msg-${i}`);
+    }
+    expect(chatLog.isVirtualized()).toBe(true);
+    chatLog.disableVirtualization();
+    expect(chatLog.isVirtualized()).toBe(false);
+  });
+
+  it("returns zero scrollOffset initially", () => {
+    const chatLog = new ChatLog(40);
+    expect(chatLog.getScrollOffset()).toBe(0);
+  });
+});
+
+// ── preserveShortcutBar tests ──────────────────────────────────────────
+
+describe("ChatLog preserveShortcutBar", () => {
+  it("clearAll with preserveShortcutBar does not clear shortcutBar", () => {
+    const chatLog = new ChatLog(40);
+    chatLog.addSystem("session agent:main:main");
+    chatLog.addUser("hello");
+
+    // No shortcutBar set, but clearAll should not throw with this option.
+    chatLog.clearAll({ preserveShortcutBar: true });
+
+    // Chat log should be cleared but no error.
+    expect(chatLog.children.length).toBe(0);
+  });
+});

@@ -50,8 +50,8 @@ type EventHandlerContext = {
   localMode?: boolean;
 };
 
-const DEFAULT_STREAMING_WATCHDOG_MS = 30_000;
-const LIFECYCLE_ERROR_RETRY_GRACE_MS = 15_000;
+const DEFAULT_STREAMING_WATCHDOG_MS = 120_000;
+const LIFECYCLE_ERROR_RETRY_GRACE_MS = 1_000;
 const STREAMING_WATCHDOG_USER_MESSAGE =
   "This response is taking longer than expected. Still waiting for the current run.";
 
@@ -87,12 +87,24 @@ export function createEventHandlers(context: EventHandlerContext) {
     { errorMessage: string; timer: ReturnType<typeof setTimeout> }
   >();
 
-  const streamingWatchdogMs =
-    typeof context.streamingWatchdogMs === "number" &&
-    Number.isFinite(context.streamingWatchdogMs) &&
-    context.streamingWatchdogMs >= 0
-      ? Math.floor(context.streamingWatchdogMs)
-      : DEFAULT_STREAMING_WATCHDOG_MS;
+  const streamingWatchdogMs = (() => {
+    // P1-1: Support OPENCLAW_STREAMING_WATCHDOG_MS environment variable.
+    const envValue = process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+    if (envValue !== undefined) {
+      const parsed = Number.parseInt(envValue, 10);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+    if (
+      typeof context.streamingWatchdogMs === "number" &&
+      Number.isFinite(context.streamingWatchdogMs) &&
+      context.streamingWatchdogMs >= 0
+    ) {
+      return Math.floor(context.streamingWatchdogMs);
+    }
+    return DEFAULT_STREAMING_WATCHDOG_MS;
+  })();
   let streamingWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   let streamingWatchdogRunId: string | null = null;
 

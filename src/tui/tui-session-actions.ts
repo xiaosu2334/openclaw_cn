@@ -8,7 +8,7 @@ import {
   normalizeMainKey,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
-import type { ChatLog } from "./components/chat-log.js";
+import type { ChatLog, MessageDescriptor } from "./components/chat-log.js";
 import type { TuiAgentsList, TuiBackend, TuiSessionMutationResult } from "./tui-backend.js";
 import { asString, extractTextFromMessage, isCommandMessage } from "./tui-formatters.js";
 import { TUI_SESSION_LOOKUP_LIMIT } from "./tui-session-list-policy.js";
@@ -448,9 +448,11 @@ export function createSessionActions(context: SessionActionContext) {
         await refreshSessionInfo();
       }
       const showTools = (state.sessionInfo.verboseLevel ?? "off") !== "off";
-      chatLog.clearAll();
+      // P0-4: Use diff-based incremental update instead of clearAll + full rebuild.
       btw.clear();
-      chatLog.addSystem(`session ${state.currentSessionKey}`);
+      const descriptors: MessageDescriptor[] = [
+        { kind: "system", text: `session ${state.currentSessionKey}` },
+      ];
       for (const entry of record.messages ?? []) {
         if (!entry || typeof entry !== "object") {
           continue;
@@ -459,14 +461,14 @@ export function createSessionActions(context: SessionActionContext) {
         if (isCommandMessage(message)) {
           const text = extractTextFromMessage(message);
           if (text) {
-            chatLog.addSystem(text);
+            descriptors.push({ kind: "system", text });
           }
           continue;
         }
         if (message.role === "user") {
           const text = extractTextFromMessage(message);
           if (text) {
-            chatLog.addUser(text);
+            descriptors.push({ kind: "user", text });
           }
           continue;
         }
@@ -475,7 +477,7 @@ export function createSessionActions(context: SessionActionContext) {
             includeThinking: state.showThinking,
           });
           if (text) {
-            chatLog.finalizeAssistant(text);
+            descriptors.push({ kind: "assistant", text });
           }
           continue;
         }
@@ -485,9 +487,12 @@ export function createSessionActions(context: SessionActionContext) {
           }
           const toolCallId = asString(message.toolCallId, "");
           const toolName = asString(message.toolName, "tool");
-          const component = chatLog.startTool(toolCallId, toolName, {});
-          component.setResult(
-            {
+          descriptors.push({
+            kind: "tool",
+            toolCallId,
+            toolName,
+            toolArgs: {},
+            toolResult: {
               content: Array.isArray(message.content)
                 ? (message.content as Record<string, unknown>[])
                 : [],
@@ -496,10 +501,11 @@ export function createSessionActions(context: SessionActionContext) {
                   ? (message.details as Record<string, unknown>)
                   : undefined,
             },
-            { isError: Boolean(message.isError) },
-          );
+            toolIsError: Boolean(message.isError),
+          });
         }
       }
+      chatLog.diffUpdate(descriptors);
       // Restore a run still streaming for this session+agent that the gateway
       // reports as in-flight. Its live deltas were delivered to a per-agent key
       // we stopped watching after switching away, so the persisted history above
@@ -577,16 +583,8 @@ export function createSessionActions(context: SessionActionContext) {
   };
 
   const abortActive = async (params?: { preferActive?: boolean }) => {
-    if (
-      opts.local === true &&
-      state.activityStatus === "finishing context" &&
-      !params?.preferActive &&
-      !state.pendingChatRunId
-    ) {
-      chatLog.addSystem("agent is finishing context; wait for it to finish before aborting");
-      tui.requestRender();
-      return;
-    }
+    // P0-2: Removed the "finishing context" blocking condition.
+    // abort is now allowed at any time.
     const runIds =
       params?.preferActive && state.activeChatRunId && state.pendingChatRunId
         ? [state.pendingChatRunId, state.activeChatRunId]
@@ -600,20 +598,30 @@ export function createSessionActions(context: SessionActionContext) {
       tui.requestRender();
       return;
     }
+    setActivityStatus("aborting");
+    tui.requestRender();
     const abortsPendingRun = Boolean(
       state.pendingChatRunId && runIds.includes(state.pendingChatRunId),
     );
     try {
-      for (const runId of runIds) {
-        await client.abortChat({
-          sessionKey: state.currentSessionKey,
-          ...(state.currentSessionKey === "global" ? { agentId: state.currentAgentId } : {}),
-          runId,
-        });
-      }
+      const results = await Promise.all(
+        runIds.map((runId) =>
+          client.abortChat({
+            sessionKey: state.currentSessionKey,
+            ...(state.currentSessionKey === "global" ? { agentId: state.currentAgentId } : {}),
+            runId,
+          }),
+        ),
+      );
       state.pendingChatRunId = null;
       if (abortsPendingRun) {
         state.pendingOptimisticUserMessage = false;
+      }
+      // P0-3: Display errorMessage from backend when agent doesn't match.
+      for (const result of results) {
+        if (result.errorMessage) {
+          chatLog.addSystem(result.errorMessage);
+        }
       }
       setActivityStatus("aborted");
     } catch (err) {

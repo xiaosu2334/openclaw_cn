@@ -1,3 +1,5 @@
+import type { WaitingMode } from "./tui-types.js";
+
 type MinimalTheme = {
   dim: (s: string) => string;
   bold: (s: string) => string;
@@ -16,6 +18,9 @@ export const defaultWaitingPhrases = [
   "pondering",
   "conjuring",
 ];
+
+/** Static waiting message displayed when waitingMode is "static". */
+const STATIC_WAITING_MESSAGE = "模型思考中…";
 
 export function pickWaitingPhrase(tick: number, phrases = defaultWaitingPhrases) {
   const idx = Math.floor(tick / 10) % phrases.length;
@@ -38,13 +43,23 @@ export function shimmerText(theme: MinimalTheme, text: string, tick: number) {
   return out;
 }
 
+/**
+ * Build the status bar message when the TUI is in a busy/waiting state.
+ *
+ * @param params.waitingMode - "static" displays a fixed text; "shimmer" uses the animated shimmer.
+ */
 export function buildWaitingStatusMessage(params: {
   theme: MinimalTheme;
   tick: number;
   elapsed: string;
   connectionStatus: string;
   phrases?: string[];
+  waitingMode?: WaitingMode;
 }) {
+  if (params.waitingMode === "static") {
+    return `${params.theme.dim(STATIC_WAITING_MESSAGE)} • ${params.elapsed} | ${params.connectionStatus}`;
+  }
+  // Shimmer fallback: animated phrase cycling
   const phrase = pickWaitingPhrase(params.tick, params.phrases);
   const cute = shimmerText(params.theme, `${phrase}…`, params.tick);
   return `${cute} • ${params.elapsed} | ${params.connectionStatus}`;

@@ -2,6 +2,12 @@ import { Container, Spacer } from "@earendil-works/pi-tui";
 import { markdownTheme, theme } from "../theme/theme.js";
 import { HyperlinkMarkdown } from "./hyperlink-markdown.js";
 
+/**
+ * Assistant (AI) message component.
+ *
+ * P1-4: Left-aligned with a leading spacer for visual separation.
+ * Message body uses terminal default foreground for contrast.
+ */
 export class AssistantMessageComponent extends Container {
   private body: HyperlinkMarkdown;
 

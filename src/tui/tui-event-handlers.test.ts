@@ -85,6 +85,8 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     activityStatus: "idle",
     statusTimeout: null,
     lastCtrlCAt: 0,
+    shortcutBarVisible: true,
+    waitingMode: "static",
     ...overrides,
   });
 
@@ -237,7 +239,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(setActivityStatus).toHaveBeenCalledWith("error");
     expect(tui.requestRender).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(15_000);
+    vi.advanceTimersByTime(1_000);
 
     expect(chatLog.dismissPendingSystem).toHaveBeenCalledWith("run-error");
     expect(chatLog.addSystem).toHaveBeenCalledWith("run error: provider exploded");
@@ -258,7 +260,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
       stream: "lifecycle",
       data: { phase: "error", endedAt: Date.now(), error: "provider exploded" },
     });
-    vi.advanceTimersByTime(15_000);
+    vi.advanceTimersByTime(1_000);
 
     handleChatEvent({
       runId: "run-error",
@@ -292,7 +294,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
       data: { phase: "start", startedAt: Date.now() },
     });
 
-    vi.advanceTimersByTime(15_000);
+    vi.advanceTimersByTime(1_000);
 
     expect(chatLog.addSystem).not.toHaveBeenCalledWith("run error: provider exploded");
     expect(state.activeChatRunId).toBe("run-retry");
@@ -1599,6 +1601,8 @@ describe("tui-event-handlers: streaming watchdog", () => {
     activityStatus: "idle",
     statusTimeout: null,
     lastCtrlCAt: 0,
+    shortcutBarVisible: true,
+    waitingMode: "static",
     ...overrides,
   });
 
@@ -2019,5 +2023,134 @@ describe("tui-event-handlers: streaming watchdog", () => {
     expect(chatLog.dismissPendingSystem).toHaveBeenCalledWith("run-final-late");
 
     handlers.dispose?.();
+  });
+
+  it("reads OPENCLAW_STREAMING_WATCHDOG_MS from environment variable (P1-1)", () => {
+    const previous = process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+    process.env.OPENCLAW_STREAMING_WATCHDOG_MS = "10000";
+    try {
+      const { state, chatLog, handlers } = createHarness({
+        // streamingWatchdogMs is not passed, so env var should be used.
+      });
+
+      handlers.handleChatEvent({
+        runId: "run-env-watchdog",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "hello" },
+      } satisfies ChatEvent);
+
+      // At 9_000ms, watchdog should NOT have fired yet (env sets it to 10_000).
+      vi.advanceTimersByTime(9_000);
+      expect(chatLog.addPendingSystem).not.toHaveBeenCalled();
+
+      // At 10_001ms, watchdog should fire.
+      vi.advanceTimersByTime(1_001);
+      expect(chatLog.addPendingSystem).toHaveBeenCalledWith(
+        "run-env-watchdog",
+        expectedTimeoutMessage,
+      );
+
+      handlers.dispose?.();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+      } else {
+        process.env.OPENCLAW_STREAMING_WATCHDOG_MS = previous;
+      }
+    }
+  });
+
+  it("OPENCLAW_STREAMING_WATCHDOG_MS=0 disables watchdog (P1-1)", () => {
+    const previous = process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+    process.env.OPENCLAW_STREAMING_WATCHDOG_MS = "0";
+    try {
+      const { state, chatLog, handlers } = createHarness({});
+
+      handlers.handleChatEvent({
+        runId: "run-disabled-env",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "hello" },
+      } satisfies ChatEvent);
+
+      vi.advanceTimersByTime(600_000);
+      expect(chatLog.addPendingSystem).not.toHaveBeenCalled();
+
+      handlers.dispose?.();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+      } else {
+        process.env.OPENCLAW_STREAMING_WATCHDOG_MS = previous;
+      }
+    }
+  });
+
+  it("OPENCLAW_STREAMING_WATCHDOG_MS env var takes priority over constructor param (P1-1)", () => {
+    const previous = process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+    process.env.OPENCLAW_STREAMING_WATCHDOG_MS = "3000";
+    try {
+      const { state, chatLog, handlers } = createHarness({
+        streamingWatchdogMs: 300_000, // constructor value should be ignored
+      });
+
+      handlers.handleChatEvent({
+        runId: "run-env-priority",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "hello" },
+      } satisfies ChatEvent);
+
+      // At 2_500ms, watchdog should NOT have fired yet.
+      vi.advanceTimersByTime(2_500);
+      expect(chatLog.addPendingSystem).not.toHaveBeenCalled();
+
+      // At 3_001ms, watchdog should fire using env value.
+      vi.advanceTimersByTime(501);
+      expect(chatLog.addPendingSystem).toHaveBeenCalledWith(
+        "run-env-priority",
+        expectedTimeoutMessage,
+      );
+
+      handlers.dispose?.();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+      } else {
+        process.env.OPENCLAW_STREAMING_WATCHDOG_MS = previous;
+      }
+    }
+  });
+
+  it("ignores invalid OPENCLAW_STREAMING_WATCHDOG_MS values (P1-1)", () => {
+    const previous = process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+    process.env.OPENCLAW_STREAMING_WATCHDOG_MS = "not-a-number";
+    try {
+      const { state, chatLog, handlers } = createHarness({
+        streamingWatchdogMs: 5_000, // should be used as fallback
+      });
+
+      handlers.handleChatEvent({
+        runId: "run-invalid-env",
+        sessionKey: state.currentSessionKey,
+        state: "delta",
+        message: { content: "hello" },
+      } satisfies ChatEvent);
+
+      vi.advanceTimersByTime(5_001);
+      expect(chatLog.addPendingSystem).toHaveBeenCalledWith(
+        "run-invalid-env",
+        expectedTimeoutMessage,
+      );
+
+      handlers.dispose?.();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_STREAMING_WATCHDOG_MS;
+      } else {
+        process.env.OPENCLAW_STREAMING_WATCHDOG_MS = previous;
+      }
+    }
   });
 });

@@ -1861,4 +1861,89 @@ describe("EmbeddedTuiBackend", () => {
     expect(defaultRuntime.log).toBe(originalRuntimeLog);
     expect(defaultRuntime.error).toBe(originalRuntimeError);
   });
+
+  // ── P0-3: abortChat agent mismatch feedback ────────────────────────────
+
+  it("returns errorMessage when aborting a global run with mismatched agent (P0-3)", async () => {
+    const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
+    getRuntimeConfigMock.mockReturnValue({
+      agents: {
+        list: [
+          { id: "main", default: true },
+          { id: "work" },
+        ],
+      },
+    });
+    const pending = deferred<{
+      payloads: Array<{ text: string }>;
+      meta: Record<string, unknown>;
+    }>();
+    agentCommandFromIngressMock.mockReturnValueOnce(pending.promise);
+
+    const backend = new EmbeddedTuiBackend();
+    backend.start();
+    await backend.sendChat({
+      sessionKey: "global",
+      agentId: "main",
+      message: "hello from main",
+      runId: "run-main-global",
+    });
+
+    // Try to abort with a different agent.
+    const result = await backend.abortChat({
+      sessionKey: "global",
+      agentId: "work",
+      runId: "run-main-global",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      aborted: false,
+      errorMessage: "无法中止：当前agent与run不匹配",
+    });
+
+    pending.resolve({ payloads: [{ text: "done" }], meta: {} });
+    await flushMicrotasks();
+  });
+
+  it("returns aborted:false without errorMessage for non-existent run (P0-3)", async () => {
+    const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
+
+    const backend = new EmbeddedTuiBackend();
+    backend.start();
+
+    const result = await backend.abortChat({
+      sessionKey: "agent:main:main",
+      runId: "run-nonexistent",
+    });
+
+    expect(result).toEqual({ ok: true, aborted: false });
+  });
+
+  it("returns aborted:false for run with mismatched session key (P0-3)", async () => {
+    const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
+    const pending = deferred<{
+      payloads: Array<{ text: string }>;
+      meta: Record<string, unknown>;
+    }>();
+    agentCommandFromIngressMock.mockReturnValueOnce(pending.promise);
+
+    const backend = new EmbeddedTuiBackend();
+    backend.start();
+    await backend.sendChat({
+      sessionKey: "agent:main:main",
+      message: "hello",
+      runId: "run-main-session",
+    });
+
+    const result = await backend.abortChat({
+      sessionKey: "agent:main:other",
+      runId: "run-main-session",
+    });
+
+    expect(result).toEqual({ ok: true, aborted: false });
+
+    pending.resolve({ payloads: [{ text: "done" }], meta: {} });
+    await flushMicrotasks();
+  });
 });

@@ -205,11 +205,16 @@ export class GatewayChatClient implements TuiBackend {
   }
 
   async abortChat(opts: { sessionKey: string; agentId?: string; runId: string }) {
-    return await this.client.request<{ ok: boolean; aborted: boolean }>("chat.abort", {
+    const result = await this.client.request<{ ok: boolean; aborted: boolean; errorMessage?: string }>("chat.abort", {
       sessionKey: opts.sessionKey,
       ...(opts.agentId ? { agentId: opts.agentId } : {}),
       runId: opts.runId,
     });
+    return {
+      ok: result.ok,
+      aborted: result.aborted,
+      ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+    };
   }
 
   async loadHistory(opts: { sessionKey: string; agentId?: string; limit?: number }) {
@@ -269,6 +274,16 @@ export class GatewayChatClient implements TuiBackend {
   async listCommands(opts?: CommandsListParams): Promise<CommandEntry[]> {
     const res = await this.client.request<CommandsListResult>("commands.list", opts ?? {});
     return Array.isArray(res?.commands) ? res.commands : [];
+  }
+
+  async patchConfig(opts: { raw: string; baseHash?: string }) {
+    return await this.client.request<{ ok: boolean; path?: string; config?: unknown }>(
+      "config.patch",
+      {
+        raw: opts.raw,
+        ...(opts.baseHash ? { baseHash: opts.baseHash } : {}),
+      },
+    );
   }
 }
 

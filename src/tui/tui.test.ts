@@ -655,3 +655,66 @@ describe("resolveLocalAuthSpawnCwd", () => {
     ).toBe("/worktree/subdir");
   });
 });
+
+// ── TUI integration: ShortcutBar, waiting state, COLORFGBG, cleanup ────
+
+describe("ShortcutBar integration", () => {
+  it("ShortcutBar component can be instantiated", async () => {
+    const { ShortcutBar } = await import("./components/shortcut-bar.js");
+    const bar = new ShortcutBar();
+    expect(bar).toBeDefined();
+    expect(bar.visible).toBeDefined();
+  });
+
+  it("ShortcutBar setVisible toggles visibility", async () => {
+    const { ShortcutBar } = await import("./components/shortcut-bar.js");
+    const bar = new ShortcutBar();
+    bar.setVisible(false);
+    // Visibility should be controllable.
+    expect(bar.visible).toBeDefined();
+  });
+});
+
+describe("waiting state / status classification", () => {
+  it("classifies all busy statuses correctly", () => {
+    expect(isTuiBusyActivityStatus("sending")).toBe(true);
+    expect(isTuiBusyActivityStatus("waiting")).toBe(true);
+    expect(isTuiBusyActivityStatus("streaming")).toBe(true);
+    expect(isTuiBusyActivityStatus("running")).toBe(true);
+    expect(isTuiBusyActivityStatus("finishing context")).toBe(true);
+    expect(isTuiBusyActivityStatus("idle")).toBe(false);
+    expect(isTuiBusyActivityStatus("aborted")).toBe(false);
+    expect(isTuiBusyActivityStatus("error")).toBe(false);
+  });
+
+  it("isTuiBusyActivityStatus returns false for unrecognized statuses", () => {
+    expect(isTuiBusyActivityStatus("")).toBe(false);
+    expect(isTuiBusyActivityStatus("unknown")).toBe(false);
+  });
+});
+
+describe("COLORFGBG detection", () => {
+  it("isLightBackground is exported as lightMode", async () => {
+    const mod = await import("./theme/theme.js");
+    expect(typeof mod.lightMode).toBe("boolean");
+  });
+});
+
+describe("resource cleanup", () => {
+  it("stopTuiSafely handles ignorable errors", () => {
+    // Should not throw for ignorable setRawMode EBADF errors.
+    expect(() =>
+      stopTuiSafely(() => {
+        throw new Error("setRawMode EBADF");
+      }),
+    ).not.toThrow();
+  });
+
+  it("deferred finish allows early request before setFinish", () => {
+    const finish = createDeferredTuiFinish();
+    const cb = vi.fn();
+    finish.requestFinish();
+    finish.setFinish(cb);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+});

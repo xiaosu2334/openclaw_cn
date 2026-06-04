@@ -30,4 +30,51 @@ describe("tui-waiting", () => {
       "<b><a>h</a></b><b><a>e</a></b><d>l</d><d>l</d><d>o</d><d>…</d> • 3s | connected",
     );
   });
+
+  // P1-5: Static waiting mode displays "模型思考中…" without shimmer animation.
+  it("buildWaitingStatusMessage returns static text when waitingMode is static (P1-5)", () => {
+    const msg = buildWaitingStatusMessage({
+      theme,
+      tick: 1,
+      elapsed: "5s",
+      connectionStatus: "connected",
+      waitingMode: "static",
+    });
+
+    expect(msg).toBe("<d>模型思考中…</d> • 5s | connected");
+  });
+
+  it("buildWaitingStatusMessage static mode ignores tick for animation", () => {
+    const msg1 = buildWaitingStatusMessage({
+      theme,
+      tick: 0,
+      elapsed: "1s",
+      connectionStatus: "connected",
+      waitingMode: "static",
+    });
+    const msg2 = buildWaitingStatusMessage({
+      theme,
+      tick: 999,
+      elapsed: "1s",
+      connectionStatus: "connected",
+      waitingMode: "static",
+    });
+
+    // Static mode should produce the same message regardless of tick.
+    expect(msg1).toBe(msg2);
+  });
+
+  it("buildWaitingStatusMessage defaults to shimmer when waitingMode is not specified", () => {
+    const msg = buildWaitingStatusMessage({
+      theme,
+      tick: 0,
+      elapsed: "3s",
+      connectionStatus: "connected",
+      phrases: ["test"],
+    });
+
+    // Should use shimmer (not static) when no waitingMode specified.
+    expect(msg).not.toContain("模型思考中…");
+    expect(msg).toContain("<b>");
+  });
 });

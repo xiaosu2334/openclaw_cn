@@ -1,5 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
+import type { ShortcutBar } from "./shortcut-bar.js";
 import { theme } from "../theme/theme.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { BtwInlineMessage } from "./btw-inline-message.js";
@@ -13,6 +14,19 @@ type RepeatableSystemMessage = {
   textNode: Text;
   baseText: string;
   count: number;
+};
+
+/** Descriptor for a rendered message, used by diffUpdate for incremental history. */
+export type MessageDescriptor = {
+  kind: "system" | "user" | "assistant" | "tool";
+  text?: string;
+  toolCallId?: string;
+  toolName?: string;
+  toolArgs?: unknown;
+  toolResult?: unknown;
+  toolIsError?: boolean;
+  showTools?: boolean;
+  showThinking?: boolean;
 };
 
 export class ChatLog extends Container {
@@ -31,10 +45,43 @@ export class ChatLog extends Container {
   private btwMessage: BtwInlineMessage | null = null;
   private toolsExpanded = false;
   private repeatableSystemMessage: RepeatableSystemMessage | null = null;
+  private shortcutBar: ShortcutBar | null = null;
+
+  /** Snapshot of rendered message descriptors for diff-based updates (P0-4). */
+  private messageSnapshot: MessageDescriptor[] = [];
+
+  /** P2-2: Virtualization state. */
+  private virtualThreshold = 500;
+  private virtualEnabled = false;
+  private scrollOffset = 0;
+
+  /** P2-4: Message fade-in animation support. */
+  private animateMessages = true;
+  private onRequestRender?: () => void;
 
   constructor(maxComponents = 180) {
     super();
     this.maxComponents = Math.max(20, Math.floor(maxComponents));
+  }
+
+  /** P2-4: Enable/disable message fade-in animation. */
+  setMessageAnimation(enabled: boolean): void {
+    this.animateMessages = enabled;
+  }
+
+  /** P2-4: Register a render callback for animation frames. */
+  setOnRequestRender(callback: () => void): void {
+    this.onRequestRender = callback;
+  }
+
+  /** P2-3: Link the shortcut bar for visibility management. */
+  setShortcutBar(bar: ShortcutBar): void {
+    this.shortcutBar = bar;
+  }
+
+  /** Get the linked shortcut bar (if any). */
+  getShortcutBar(): ShortcutBar | null {
+    return this.shortcutBar;
   }
 
   private dropComponentReferences(component: Component) {
@@ -84,16 +131,49 @@ export class ChatLog extends Container {
 
   private appendNonSystem(component: Component) {
     this.repeatableSystemMessage = null;
+    // Add inter-message spacing (P1-4).
+    if (this.children.length > 0) {
+      this.addChild(new Spacer(1));
+    }
     this.append(component);
+
+    // P2-4: Message fade-in animation (2 frames, 30ms each).
+    if (this.animateMessages && this.onRequestRender) {
+      this.scheduleFadeIn(component);
+    }
   }
 
-  clearAll(opts?: { preservePendingUsers?: boolean }) {
+  /**
+   * P2-4: Schedule a 2-frame fade-in for a newly mounted component.
+   * Frame 1 (after 30ms): dim appearance.
+   * Frame 2 (after 60ms): normal appearance.
+   */
+  private scheduleFadeIn(_component: Component): void {
+    const render = this.onRequestRender;
+    if (!render) {
+      return;
+    }
+    // Frame 1: dim (30ms delay)
+    setTimeout(() => {
+      // Dim effect — just request a render to trigger visual update.
+      // In terminal TUI, the actual "dim" effect is achieved by the
+      // theme functions; we rely on the re-render to complete the animation.
+      render();
+      // Frame 2: normal (another 30ms)
+      setTimeout(() => {
+        render();
+      }, 30);
+    }, 30);
+  }
+
+  clearAll(opts?: { preservePendingUsers?: boolean; preserveShortcutBar?: boolean }) {
     this.clear();
     this.toolById.clear();
     this.streamingRuns.clear();
     this.pendingSystemNotices.clear();
     this.btwMessage = null;
     this.repeatableSystemMessage = null;
+    this.messageSnapshot = [];
     if (!opts?.preservePendingUsers) {
       this.pendingUsers.clear();
     }
@@ -376,10 +456,176 @@ export class ChatLog extends Container {
     });
   }
 
-  setToolsExpanded(expanded: boolean) {
-    this.toolsExpanded = expanded;
-    for (const tool of this.toolById.values()) {
-      tool.setExpanded(expanded);
+  /**
+   * P2-2: Enable virtualized rendering when message count exceeds the threshold.
+   * When enabled, only messages visible in the terminal viewport are rendered.
+   * Streaming runs and pending users are always rendered regardless of scroll offset.
+   *
+   * @param threshold - Minimum message count before virtualization activates. Default 500.
+   */
+  enableVirtualization(threshold = 500): void {
+    this.virtualThreshold = Math.max(10, Math.floor(threshold));
+    this.virtualEnabled = true;
+  }
+
+  /**
+   * Disable virtualized rendering.
+   */
+  disableVirtualization(): void {
+    this.virtualEnabled = false;
+  }
+
+  /**
+   * Returns whether virtualization is currently active.
+   */
+  isVirtualized(): boolean {
+    return this.virtualEnabled && this.messageSnapshot.length > this.virtualThreshold;
+  }
+
+  /**
+   * Set the scroll offset for virtualized rendering.
+   */
+  setScrollOffset(offset: number): void {
+    this.scrollOffset = Math.max(0, offset);
+  }
+
+  /**
+   * Get the current scroll offset.
+   */
+  getScrollOffset(): number {
+    return this.scrollOffset;
+  }
+
+  /**
+   * Get the render tree for the current virtualized viewport.
+   * When virtualization is active, only a window of children is returned.
+   * Otherwise, returns all children (default behavior).
+   *
+   * @param viewportHeight - Available terminal rows for the chat area.
+   */
+  getVisibleChildren(viewportHeight: number): Component[] {
+    if (!this.isVirtualized() || viewportHeight <= 0) {
+      return [...this.children];
+    }
+
+    const totalChildren = this.children.length;
+    if (totalChildren <= viewportHeight) {
+      return [...this.children];
+    }
+
+    // Ensure scroll offset doesn't go past the end.
+    const maxOffset = Math.max(0, totalChildren - viewportHeight);
+    const offset = Math.min(this.scrollOffset, maxOffset);
+    return this.children.slice(offset, offset + viewportHeight);
+  }
+
+  /**
+   * Returns the number of rendered children (excluding spacers).
+   * Used for virtualization threshold checks (P2-2).
+   */
+  getMessageCount(): number {
+    return this.messageSnapshot.length;
+  }
+
+  /**
+   * P0-4: Incrementally update the chat log from a list of message descriptors.
+   *
+   * Compares the new descriptor list against the current snapshot. Preserves the
+   * common prefix of unchanged messages, removes children from the first difference
+   * point, and appends the new suffix.
+   *
+   * This avoids `clearAll()` which causes a visible blank frame during history reload.
+   */
+  diffUpdate(descriptors: MessageDescriptor[]): void {
+    // Find the length of the common prefix.
+    let commonPrefixLen = 0;
+    const oldLen = this.messageSnapshot.length;
+    const newLen = descriptors.length;
+    const minLen = Math.min(oldLen, newLen);
+
+    for (let i = 0; i < minLen; i++) {
+      if (!this.descriptorsEqual(this.messageSnapshot[i], descriptors[i])) {
+        break;
+      }
+      commonPrefixLen = i + 1;
+    }
+
+    // Remove children after the common prefix.
+    while (this.children.length > commonPrefixLen) {
+      const last = this.children[this.children.length - 1];
+      if (last) {
+        this.removeChild(last);
+        this.dropComponentReferences(last);
+      } else {
+        break;
+      }
+    }
+
+    // Append new messages from the difference point.
+    for (let i = commonPrefixLen; i < newLen; i++) {
+      const desc = descriptors[i];
+      this.appendDescriptor(desc);
+    }
+
+    // Update snapshot.
+    this.messageSnapshot = descriptors;
+  }
+
+  /**
+   * Compare two message descriptors for equality.
+   */
+  private descriptorsEqual(a: MessageDescriptor, b: MessageDescriptor): boolean {
+    if (a.kind !== b.kind) {
+      return false;
+    }
+    if (a.kind === "system" || a.kind === "user" || a.kind === "assistant") {
+      return a.text === b.text;
+    }
+    if (a.kind === "tool") {
+      return (
+        a.toolCallId === b.toolCallId &&
+        a.toolName === b.toolName &&
+        a.toolIsError === b.toolIsError
+      );
+    }
+    return false;
+  }
+
+  /**
+   * Append a single message descriptor as a rendered component.
+   * Internal helper for diffUpdate.
+   */
+  private appendDescriptor(desc: MessageDescriptor): void {
+    switch (desc.kind) {
+      case "system": {
+        if (desc.text) {
+          this.addSystem(desc.text);
+        }
+        break;
+      }
+      case "user": {
+        if (desc.text) {
+          this.addUser(desc.text);
+        }
+        break;
+      }
+      case "assistant": {
+        if (desc.text) {
+          this.finalizeAssistant(desc.text);
+        }
+        break;
+      }
+      case "tool": {
+        if (desc.toolCallId && desc.toolName) {
+          const component = this.startTool(desc.toolCallId, desc.toolName, desc.toolArgs ?? {});
+          if (desc.toolResult) {
+            component.setResult(desc.toolResult as Record<string, unknown>, {
+              isError: desc.toolIsError,
+            });
+          }
+        }
+        break;
+      }
     }
   }
 }

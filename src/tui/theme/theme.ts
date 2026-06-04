@@ -6,10 +6,50 @@ import type {
 } from "@earendil-works/pi-tui";
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import chalk from "chalk";
+import { mergePalette, validateHexColor } from "./custom-theme.js";
 import type { SearchableSelectListTheme } from "../components/searchable-select-list.js";
 
-const DARK_TEXT = "#E8E3D5";
-const LIGHT_TEXT = "#1E1E1E";
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface Palette {
+  text: string;
+  bg: string;
+  dim: string;
+  accent: string;
+  accentSoft: string;
+  border: string;
+  userBg: string;
+  userText: string;
+  systemText: string;
+  toolPendingBg: string;
+  toolSuccessBg: string;
+  toolErrorBg: string;
+  toolTitle: string;
+  toolOutput: string;
+  quote: string;
+  quoteBorder: string;
+  code: string;
+  codeBlock: string;
+  codeBorder: string;
+  link: string;
+  error: string;
+  success: string;
+  shortcutBarBg: string;
+  shortcutKey: string;
+  shortcutHint: string;
+}
+
+export interface CustomThemeConfig {
+  darkPalette?: Partial<Palette>;
+  lightPalette?: Partial<Palette>;
+  shortcutBarVisible?: boolean;
+  waitingMode?: "static" | "shimmer";
+}
+
+// ── Luminance helpers ──────────────────────────────────────────────────────
+
+const DARK_TEXT = "#E8DDD0";
+const LIGHT_TEXT = "#3D3226";
 const XTERM_LEVELS = [0, 95, 135, 175, 215, 255] as const;
 
 function channelToSrgb(value: number): number {
@@ -77,55 +117,118 @@ function isLightBackground(): boolean {
 /** Whether the terminal has a light background. Exported for testing only. */
 export const lightMode = isLightBackground();
 
-export const darkPalette = {
-  text: "#E8E3D5",
-  dim: "#7B7F87",
-  accent: "#F6C453",
-  accentSoft: "#F2A65A",
-  border: "#3C414B",
-  userBg: "#2B2F36",
-  userText: "#F3EEE0",
-  systemText: "#9BA3B2",
-  toolPendingBg: "#1F2A2F",
-  toolSuccessBg: "#1E2D23",
-  toolErrorBg: "#2F1F1F",
-  toolTitle: "#F6C453",
-  toolOutput: "#E1DACB",
-  quote: "#8CC8FF",
-  quoteBorder: "#3B4D6B",
-  code: "#F0C987",
-  codeBlock: "#1E232A",
-  codeBorder: "#343A45",
-  link: "#7DD3A5",
-  error: "#F97066",
-  success: "#7DD3A5",
-} as const;
+// ── Base Palettes (warm-tone redesign per PRD §4.1) ────────────────────────
 
-export const lightPalette = {
-  text: "#1E1E1E",
-  dim: "#5B6472",
-  accent: "#B45309",
-  accentSoft: "#C2410C",
-  border: "#5B6472",
-  userBg: "#F3F0E8",
-  userText: "#1E1E1E",
-  systemText: "#4B5563",
-  toolPendingBg: "#EFF6FF",
-  toolSuccessBg: "#ECFDF5",
-  toolErrorBg: "#FEF2F2",
-  toolTitle: "#B45309",
-  toolOutput: "#374151",
-  quote: "#1D4ED8",
-  quoteBorder: "#2563EB",
-  code: "#92400E",
-  codeBlock: "#F9FAFB",
-  codeBorder: "#92400E",
-  link: "#047857",
-  error: "#DC2626",
-  success: "#047857",
-} as const;
+export const darkPalette: Palette = {
+  text: "#E8DDD0",
+  bg: "#1E1C1A",
+  dim: "#A09888",
+  accent: "#D4A853",
+  accentSoft: "#5C4A2E",
+  border: "#4A4238",
+  userBg: "#3D352A",
+  userText: "#E8DDD0",
+  systemText: "#A09888",
+  toolPendingBg: "#2D2822",
+  toolSuccessBg: "#1E2A22",
+  toolErrorBg: "#2D1E1E",
+  toolTitle: "#C8A44E",
+  toolOutput: "#C8C0B8",
+  quote: "#A09888",
+  quoteBorder: "#4A4238",
+  code: "#D4A853",
+  codeBlock: "#252220",
+  codeBorder: "#3D352A",
+  link: "#7DC4A4",
+  error: "#E0735A",
+  success: "#7DC4A4",
+  shortcutBarBg: "#252220",
+  shortcutKey: "#D4A853",
+  shortcutHint: "#6E6058",
+};
 
-export const palette = lightMode ? lightPalette : darkPalette;
+export const lightPalette: Palette = {
+  text: "#3D3226",
+  bg: "#FBF7F0",
+  dim: "#8C7E6E",
+  accent: "#B8751F",
+  accentSoft: "#D4B896",
+  border: "#D4C8B0",
+  userBg: "#F0E8D8",
+  userText: "#3D3226",
+  systemText: "#6E6058",
+  toolPendingBg: "#F5EEE0",
+  toolSuccessBg: "#EDF5EE",
+  toolErrorBg: "#F5E8E8",
+  toolTitle: "#B8751F",
+  toolOutput: "#5C4A3A",
+  quote: "#6E6058",
+  quoteBorder: "#D4C8B0",
+  code: "#B8751F",
+  codeBlock: "#F5F0E8",
+  codeBorder: "#E0D5C0",
+  link: "#3D8C6A",
+  error: "#C04A3A",
+  success: "#3D8C6A",
+  shortcutBarBg: "#F0E8D8",
+  shortcutKey: "#B8751F",
+  shortcutHint: "#A09080",
+};
+
+// ── Active palette (mutable, so loadCustomTheme can merge overrides) ────────
+
+/** Active palette. Mutated by loadCustomTheme() to apply user overrides. */
+export const palette: Palette = { ...(lightMode ? lightPalette : darkPalette) };
+
+// ── Custom theme loading ───────────────────────────────────────────────────
+
+/**
+ * Apply custom theme overrides from openclaw.json's `tui` field.
+ * Called once during TUI initialization, before any rendering.
+ *
+ * Uses deep merge (mergePalette) so nested palette values are properly
+ * combined with user-provided overrides. Also validates hex colors.
+ *
+ * @param custom - The `config.tui` object from runtime config.
+ */
+export function loadCustomTheme(custom?: CustomThemeConfig | null): void {
+  if (!custom) {
+    return;
+  }
+  const source = lightMode ? custom.lightPalette : custom.darkPalette;
+  if (!source) {
+    return;
+  }
+  // T04: Deep merge with validation via mergePalette.
+  // Filter out invalid hex values before merging.
+  const validated: Partial<Palette> = {};
+  const keys = Object.keys(source) as (keyof Palette)[];
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value.length > 0) {
+      if (validateHexColor(value)) {
+        validated[key] = value;
+      }
+    }
+  }
+  const merged = mergePalette(palette, validated);
+  // Update the active palette in-place to preserve all references.
+  const paletteKeys = Object.keys(palette) as (keyof Palette)[];
+  for (const key of paletteKeys) {
+    (palette as Record<string, string>)[key] = merged[key];
+  }
+}
+
+/**
+ * Resolve the final palette after custom overrides.
+ * In T04 this will call mergePalette for deep merge support;
+ * for T01 it returns the already-merged palette.
+ */
+export function resolveCustomPalette(): Palette {
+  return palette;
+}
+
+// ── Theme functions ────────────────────────────────────────────────────────
 
 const fg = (hex: string) => (text: string) => chalk.hex(hex)(text);
 const bg = (hex: string) => (text: string) => chalk.bgHex(hex)(text);
@@ -158,7 +261,12 @@ export const theme = {
   border: fg(palette.border),
   bold: (text: string) => chalk.bold(text),
   italic: (text: string) => chalk.italic(text),
+  shortcutKey: fg(palette.shortcutKey),
+  shortcutHint: fg(palette.shortcutHint),
+  shortcutBarBg: bg(palette.shortcutBarBg),
 };
+
+// ── Sub-themes ─────────────────────────────────────────────────────────────
 
 export const markdownTheme: MarkdownTheme = {
   heading: (text) => chalk.bold(fg(palette.accent)(text)),

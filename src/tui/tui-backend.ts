@@ -135,7 +135,7 @@ export type TuiBackend = {
     sessionKey: string;
     agentId?: string;
     runId: string;
-  }) => Promise<{ ok: boolean; aborted: boolean }>;
+  }) => Promise<{ ok: boolean; aborted: boolean; errorMessage?: string }>;
   loadHistory: (opts: { sessionKey: string; agentId?: string; limit?: number }) => Promise<unknown>;
   listSessions: (opts?: SessionsListParams) => Promise<TuiSessionList>;
   listAgents: () => Promise<TuiAgentsList>;
@@ -149,4 +149,8 @@ export type TuiBackend = {
   listModels: () => Promise<TuiModelChoice[]>;
   listCommands?: (opts?: CommandsListParams) => Promise<CommandEntry[]>;
   runGoalCommand?: (opts: TuiGoalCommandOptions) => Promise<{ text: string }>;
+  patchConfig?: (opts: {
+    raw: string;
+    baseHash?: string;
+  }) => Promise<{ ok: boolean; path?: string; config?: unknown }>;
 };

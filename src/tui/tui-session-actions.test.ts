@@ -30,6 +30,8 @@ describe("tui session actions", () => {
     activityStatus: "idle",
     statusTimeout: null,
     lastCtrlCAt: 0,
+    shortcutBarVisible: true,
+    waitingMode: "static",
     ...overrides,
   });
 
@@ -615,6 +617,8 @@ describe("tui session actions", () => {
       activityStatus: "idle",
       statusTimeout: null,
       lastCtrlCAt: 0,
+      shortcutBarVisible: true,
+      waitingMode: "static",
     };
 
     const { refreshSessionInfo } = createSessionActions({
@@ -928,9 +932,11 @@ describe("tui session actions", () => {
     expect(requestRender).toHaveBeenCalledOnce();
   });
 
-  it("does not abort local post-turn maintenance while finishing context", async () => {
+  // P0-2: abortActive now allows abort during finishing context.
+  // The finishing context blocking condition has been removed.
+  it("aborts active run even while finishing context (P0-2 fix)", async () => {
     const abortChat = vi.fn().mockResolvedValue({ ok: true, aborted: true });
-    const addSystem = vi.fn();
+    const setActivityStatus = vi.fn();
     const requestRender = vi.fn();
     const state = createBaseState({
       activeChatRunId: "run-finishing",
@@ -941,22 +947,25 @@ describe("tui session actions", () => {
     const { abortActive } = createTestSessionActions({
       client: { listSessions: vi.fn(), abortChat } as unknown as TuiBackend,
       chatLog: {
-        addSystem,
+        addSystem: vi.fn(),
         clearAll: vi.fn(),
       } as unknown as import("./components/chat-log.js").ChatLog,
       tui: { requestRender } as unknown as import("@earendil-works/pi-tui").TUI,
       opts: { local: true },
       state,
+      setActivityStatus,
     });
 
     await abortActive();
 
-    expect(abortChat).not.toHaveBeenCalled();
-    expect(addSystem).toHaveBeenCalledWith(
-      "agent is finishing context; wait for it to finish before aborting",
-    );
+    // P0-2: abort is now allowed - the backend should be called.
+    expect(abortChat).toHaveBeenCalledWith({
+      sessionKey: "agent:main:main",
+      runId: "run-finishing",
+    });
+    expect(state.pendingChatRunId).toBeNull();
+    expect(setActivityStatus).toHaveBeenCalledWith("aborted");
     expect(requestRender).toHaveBeenCalled();
-    expect(state.activeChatRunId).toBe("run-finishing");
   });
 
   it("aborts local post-turn maintenance for explicit stop", async () => {
@@ -1193,5 +1202,183 @@ describe("tui session actions", () => {
       limit: 200,
     });
     expect(state.currentSessionId).toBe("session-work-global");
+  });
+
+  // ── P0-4: diffUpdate incremental history tests ──────────────────────────
+
+  it("uses diffUpdate instead of clearAll when loading history (P0-4)", async () => {
+    const loadHistory = vi.fn().mockResolvedValue({
+      sessionId: "session-1",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hello" }] },
+        { role: "assistant", content: [{ type: "text", text: "hi there" }] },
+      ],
+    });
+    const diffUpdate = vi.fn();
+    const clearAll = vi.fn();
+    const btw = createBtwPresenter();
+    const state = createBaseState();
+
+    const { loadHistory: runLoadHistory } = createTestSessionActions({
+      client: { listSessions: vi.fn(), loadHistory } as unknown as TuiBackend,
+      chatLog: {
+        addSystem: vi.fn(),
+        clearAll,
+        diffUpdate,
+      } as unknown as import("./components/chat-log.js").ChatLog,
+      btw,
+      state,
+    });
+
+    await runLoadHistory();
+
+    // P0-4: loadHistory should use diffUpdate, not clearAll.
+    expect(diffUpdate).toHaveBeenCalledTimes(1);
+    expect(clearAll).not.toHaveBeenCalled();
+    // The first descriptor should be the system "session ..." message.
+    const descriptors = diffUpdate.mock.calls[0][0];
+    expect(descriptors.length).toBeGreaterThanOrEqual(1);
+    expect(descriptors[0]).toEqual({ kind: "system", text: "session agent:main:main" });
+  });
+
+  it("includes user and assistant message descriptors in diffUpdate (P0-4)", async () => {
+    const loadHistory = vi.fn().mockResolvedValue({
+      sessionId: "session-1",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hello" }] },
+        { role: "assistant", content: [{ type: "text", text: "hi there" }] },
+      ],
+    });
+    const diffUpdate = vi.fn();
+    const btw = createBtwPresenter();
+    const state = createBaseState();
+
+    const { loadHistory: runLoadHistory } = createTestSessionActions({
+      client: { listSessions: vi.fn(), loadHistory } as unknown as TuiBackend,
+      chatLog: {
+        addSystem: vi.fn(),
+        clearAll: vi.fn(),
+        diffUpdate,
+      } as unknown as import("./components/chat-log.js").ChatLog,
+      btw,
+      state,
+    });
+
+    await runLoadHistory();
+
+    const descriptors = diffUpdate.mock.calls[0][0] as Array<{
+      kind: string;
+      text?: string;
+    }>;
+    expect(descriptors[0]).toEqual({ kind: "system", text: "session agent:main:main" });
+    expect(descriptors[1]).toEqual({ kind: "user", text: "hello" });
+    expect(descriptors[2]).toEqual({ kind: "assistant", text: "hi there" });
+  });
+
+  it("includes tool result descriptors in diffUpdate when verbose is on (P0-4)", async () => {
+    const loadHistory = vi.fn().mockResolvedValue({
+      sessionId: "session-1",
+      messages: [
+        {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          toolName: "read_file",
+          content: [{ type: "text", text: "file contents" }],
+          isError: false,
+        },
+      ],
+    });
+    const diffUpdate = vi.fn();
+    const btw = createBtwPresenter();
+    const state = createBaseState({
+      sessionInfo: { verboseLevel: "on" },
+    });
+
+    const { loadHistory: runLoadHistory } = createTestSessionActions({
+      client: { listSessions: vi.fn(), loadHistory } as unknown as TuiBackend,
+      chatLog: {
+        addSystem: vi.fn(),
+        clearAll: vi.fn(),
+        diffUpdate,
+      } as unknown as import("./components/chat-log.js").ChatLog,
+      btw,
+      state,
+    });
+
+    await runLoadHistory();
+
+    const descriptors = diffUpdate.mock.calls[0][0] as Array<{
+      kind: string;
+      toolCallId?: string;
+      toolName?: string;
+    }>;
+    const toolDescriptor = descriptors.find((d) => d.kind === "tool");
+    expect(toolDescriptor).toBeDefined();
+    expect(toolDescriptor?.toolCallId).toBe("tc-1");
+    expect(toolDescriptor?.toolName).toBe("read_file");
+  });
+
+  it("skips tool results in diffUpdate when verbose is off (P0-4)", async () => {
+    const loadHistory = vi.fn().mockResolvedValue({
+      sessionId: "session-1",
+      messages: [
+        {
+          role: "toolResult",
+          toolCallId: "tc-1",
+          toolName: "read_file",
+          content: [{ type: "text", text: "file contents" }],
+        },
+      ],
+    });
+    const diffUpdate = vi.fn();
+    const btw = createBtwPresenter();
+    const state = createBaseState({
+      sessionInfo: { verboseLevel: "off" },
+    });
+
+    const { loadHistory: runLoadHistory } = createTestSessionActions({
+      client: { listSessions: vi.fn(), loadHistory } as unknown as TuiBackend,
+      chatLog: {
+        addSystem: vi.fn(),
+        clearAll: vi.fn(),
+        diffUpdate,
+      } as unknown as import("./components/chat-log.js").ChatLog,
+      btw,
+      state,
+    });
+
+    await runLoadHistory();
+
+    const descriptors = diffUpdate.mock.calls[0][0] as Array<{ kind: string }>;
+    const toolDescriptor = descriptors.find((d) => d.kind === "tool");
+    expect(toolDescriptor).toBeUndefined();
+  });
+
+  it("handles errorMessage from backend in abortActive (P0-3)", async () => {
+    const abortChat = vi.fn().mockResolvedValue({
+      ok: true,
+      aborted: false,
+      errorMessage: "无法中止：当前agent与run不匹配",
+    });
+    const addSystem = vi.fn();
+    const state = createBaseState({
+      activeChatRunId: "run-mismatch",
+      pendingChatRunId: null,
+    });
+
+    const { abortActive } = createTestSessionActions({
+      client: { listSessions: vi.fn(), abortChat } as unknown as TuiBackend,
+      chatLog: {
+        addSystem,
+        clearAll: vi.fn(),
+      } as unknown as import("./components/chat-log.js").ChatLog,
+      state,
+      setActivityStatus: vi.fn(),
+    });
+
+    await abortActive();
+
+    // P0-3: errorMessage from backend should be displayed to user.
+    expect(addSystem).toHaveBeenCalledWith("无法中止：当前agent与run不匹配");
   });
 });

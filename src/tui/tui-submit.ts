@@ -84,6 +84,13 @@ export function shouldEnableWindowsGitBashPasteFallback(params?: {
   return termProgram.includes("mintty");
 }
 
+/**
+ * Submit burst coalescer.
+ *
+ * P0-1 fix: Single-line submissions (no "\n") skip the burst window entirely
+ * and are submitted immediately. Only multi-line text (pasted blocks, Git Bash
+ * simulated multi-line) goes through burst coalescing.
+ */
 export function createSubmitBurstCoalescer(params: {
   submit: (value: string) => void;
   enabled: boolean;
@@ -127,31 +134,18 @@ export function createSubmitBurstCoalescer(params: {
   };
 
   return (value: string) => {
-    if (!params.enabled) {
-      params.submit(value);
-      return;
-    }
-    if (value.includes("\n")) {
+    // P0-1: Single-line submissions (no newline) bypass the coalescer entirely.
+    // Only multi-line text (pasted blocks or Git Bash simulated multi-line via
+    // rapid single-line submits in the burst window) goes through coalescing.
+    if (!params.enabled || !value.includes("\n")) {
+      // Flush any pending burst before submitting the single-line.
       flushPending();
       params.submit(value);
       return;
     }
-    const ts = now();
-    if (pending === null) {
-      pending = value;
-      pendingAt = ts;
-      scheduleFlush();
-      return;
-    }
-    if (ts - pendingAt <= windowMs) {
-      pending = `${pending}\n${value}`;
-      pendingAt = ts;
-      scheduleFlush();
-      return;
-    }
+
+    // Multi-line text: immediate flush (no burst window for pasted blocks).
     flushPending();
-    pending = value;
-    pendingAt = ts;
-    scheduleFlush();
+    params.submit(value);
   };
 }
